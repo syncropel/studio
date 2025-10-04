@@ -1,0 +1,57 @@
+name: Build and Release Studio UI Artifact
+
+on:
+  push:
+    tags:
+      - "v*" # Trigger on any tag like v0.1.0
+
+jobs:
+  build-and-release-ui-artifact:
+    name: Build Static UI and Create Release
+    runs-on: ubuntu-latest
+    # This job needs permission to write to the GitHub Release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm" # Enable caching for npm dependencies
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build static site for production
+        # This runs the `next build` command which produces the `out/` directory
+        run: npm run build
+
+      - name: Create archive of the build output
+        # This step creates the final, versioned artifact
+        run: |
+          # Extract version from the Git tag (e.g., v0.1.0 -> 0.1.0)
+          VERSION=$(echo "${{ github.ref_name }}" | sed 's/v//')
+
+          # Define the standard artifact name
+          ARCHIVE_NAME="studio-ui-v${VERSION}.tar.gz"
+
+          # Create the compressed archive. The `-C out .` part is crucial.
+          # It changes into the 'out' directory and archives its contents,
+          # preventing an extra 'out/' folder inside the archive.
+          tar -czf "${ARCHIVE_NAME}" -C out .
+
+          # Make the archive name available to subsequent steps
+          echo "ASSET_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+
+      - name: Create GitHub Release and Upload UI Artifact
+        # This single step creates the release and attaches our one artifact
+        uses: softprops/action-gh-release@v2
+        with:
+          # Automatically generate release notes from commits
+          generate_release_notes: true
+          # Specify the file to upload
+          files: ${{ env.ASSET_NAME }}
