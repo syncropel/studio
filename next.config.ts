@@ -5,7 +5,7 @@ const isDev = process.env.NODE_ENV === "development";
 
 const nextConfig: NextConfig = {
   // Your existing configuration for static exports, which is perfect for Electron builds.
-  // output: "export",
+  output: "export",
   assetPrefix: "./",
   // The `rewrites` function allows us to proxy requests during development.
   // This will NOT be included in the production build (`npm run build`).
