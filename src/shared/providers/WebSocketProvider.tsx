@@ -1,4 +1,3 @@
-// /home/dpwanjala/repositories/cx-studio/src/shared/providers/WebSocketProvider.tsx
 "use client";
 
 import React, {
@@ -6,11 +5,25 @@ import React, {
   useContext,
   ReactNode,
   useCallback,
+  useState,
+  useEffect,
+  useRef, // --- NEW: Import useRef for stability
 } from "react";
 import useReactWebSocket, { ReadyState } from "react-use-websocket";
 import { notifications } from "@mantine/notifications";
 import { useSessionStore } from "@/shared/store/useSessionStore";
 import { InboundMessage, ErrorPayload } from "@/shared/types/server";
+
+// --- NEW: A helper to get a descriptive string for the ReadyState enum ---
+const readyStateToString = (readyState: ReadyState) => {
+  return {
+    [ReadyState.CONNECTING]: "Connecting",
+    [ReadyState.OPEN]: "Open",
+    [ReadyState.CLOSING]: "Closing",
+    [ReadyState.CLOSED]: "Closed",
+    [ReadyState.UNINSTANTIATED]: "Uninstantiated",
+  }[readyState];
+};
 
 type OutboundMessage = {
   type: string;
@@ -25,32 +38,53 @@ interface WebSocketContextType {
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
 
-// Centralized logger for consistent formatting
-const logger = (...args: unknown[]) =>
-  console.log("%c[WS Provider]", "color: purple; font-weight: bold;", ...args);
-
-const CX_SERVER_URL = "ws://127.0.0.1:8888/ws";
-
 export function WebSocketProvider({ children }: { children: ReactNode }) {
+  const [socketUrl, setSocketUrl] = useState<string | null>(null);
   const { setLastJsonMessage, setBlockResult } = useSessionStore();
 
+  // This effect runs only once on the client to determine the URL.
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.host;
+      const url = `${protocol}//${host}/ws`;
+      setSocketUrl(url);
+    }
+  }, []);
+
   const { sendJsonMessage: sendBaseMessage, readyState } =
-    useReactWebSocket<InboundMessage>(CX_SERVER_URL, {
-      onOpen: () => logger("✅ WebSocket connection established."),
-      onClose: () => {
-        logger("❌ WebSocket connection closed. Attempting to reconnect...");
+    useReactWebSocket<InboundMessage>(socketUrl, {
+      onOpen: () => {
+        console.log("[WS] Connection established.");
+        notifications.hide("ws-conn-error");
+        notifications.show({
+          id: "ws-conn-success",
+          title: "Connected",
+          message: "Successfully connected to the cx-server.",
+          color: "green",
+          autoClose: 3000,
+        });
+      },
+      onClose: (event) => {
+        console.warn(
+          `[WS] Connection closed. Clean close: ${event.wasClean}, Code: ${event.code}`
+        );
         notifications.show({
           id: "ws-conn-error",
           title: "Connection Lost",
-          message: "Attempting to reconnect to the cx-server...",
+          message: "Attempting to reconnect...",
           color: "red",
           loading: true,
           autoClose: false,
           withCloseButton: false,
         });
       },
+      onError: (event) => {
+        console.error("[WS] WebSocket error observed:", event);
+      },
       onMessage: (event) => {
-        logger("🚀 MESSAGE RECEIVED FROM SERVER:", event.data);
+        // We can keep a minimal log for received messages if needed for debugging
+        // console.log("[WS] Received:", event.data);
         try {
           const parsedData: InboundMessage = JSON.parse(event.data);
 
@@ -63,50 +97,63 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               status,
               payload: error ? { error } : null,
             });
-          }
-          // --- START OF DEFINITIVE FIX ---
-          // Handle generic errors that are related to a block execution
-          else if (
+          } else if (
             parsedData.type === "RESULT_ERROR" &&
             parsedData.command_id.startsWith("run-block-")
           ) {
-            // Find which block is currently in the 'running' state in our store.
-            // This is a reliable way to associate the error with the correct block.
             const runningBlockId = Object.entries(
               useSessionStore.getState().blockResults
             ).find(([_id, res]) => res.status === "running")?.[0];
 
             if (runningBlockId) {
-              // Update that specific block's state to 'error' and store the error message.
               setBlockResult(runningBlockId, {
                 status: "error",
                 payload: parsedData.payload as ErrorPayload,
               });
             }
-            // Also update the lastJsonMessage for any other generic listeners.
             setLastJsonMessage(parsedData);
-            // --- END OF DEFINITIVE FIX ---
           } else {
-            // Fallback for all other message types (e.g., sidebar lists, session updates)
             setLastJsonMessage(parsedData);
           }
         } catch (e) {
-          logger("🔥 Error parsing WS message:", e);
+          console.error("[WS] Error parsing message:", e);
         }
       },
-      shouldReconnect: () => true,
-      reconnectInterval: 3000,
+      // --- START: Stability and Reconnection Fixes ---
+      shouldReconnect: () => true, // Always attempt to reconnect
+      reconnectInterval: 3000, // Reconnect every 3 seconds
+      reconnectAttempts: 10, // Attempt up to 10 times before giving up
+      retryOnError: true, // Also try to reconnect on WebSocket errors
+      // This is the key fix for the "hot-reload-only" issue.
+      // It ensures that even if the connection closes unexpectedly (e.g., dev server restarts),
+      // the hook will re-establish it.
+      share: true,
+      // This helps prevent duplicate connections in React 18's Strict Mode
+      // by ensuring only one underlying socket is created for this URL.
+      // --- END: Stability and Reconnection Fixes ---
+      filter: () => socketUrl !== null,
     });
+
+  // Log ready state changes for debugging connection lifecycle
+  useEffect(() => {
+    console.log(
+      `[WS] Connection state changed to: ${readyStateToString(readyState)}`
+    );
+  }, [readyState]);
 
   const sendMessage = useCallback(
     (message: OutboundMessage) => {
-      logger("📤 SENDING MESSAGE TO SERVER:", message);
+      // Keep this log for development, it's very useful
+      console.log("[WS] Sending:", message);
       if (readyState === ReadyState.OPEN) {
         sendBaseMessage(message);
       } else {
+        console.error(
+          "[WS] Attempted to send message while connection was not open."
+        );
         notifications.show({
           title: "Connection Error",
-          message: "Cannot send message: Not connected to the cx-server.",
+          message: "Cannot send command: Not connected to the cx-server.",
           color: "red",
         });
       }
