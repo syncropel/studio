@@ -8,6 +8,8 @@ interface CollapsibleSectionProps {
   icon: React.ElementType;
   children: React.ReactNode;
   isExpanded?: boolean;
+  // ADDED: New prop to control whether children should have left padding
+  noPadding?: boolean;
 }
 
 export default function CollapsibleSection({
@@ -15,6 +17,7 @@ export default function CollapsibleSection({
   icon: Icon,
   children,
   isExpanded: defaultExpanded = false,
+  noPadding = false, // ADDED: Default to false to maintain existing behavior
 }: CollapsibleSectionProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
@@ -40,7 +43,8 @@ export default function CollapsibleSection({
           />
         </Group>
       </UnstyledButton>
-      {isExpanded && <Box pl="lg">{children}</Box>}
+      {/* CHANGED: Conditionally apply left padding based on noPadding prop */}
+      {isExpanded && <Box pl={noPadding ? 0 : "lg"}>{children}</Box>}
     </Box>
   );
 }

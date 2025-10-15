@@ -1,24 +1,20 @@
-// /home/dpwanjala/repositories/cx-studio/src/widgets/OutputViewer/renderers/TableOutput.tsx
 "use client";
 
 import React, { useMemo } from "react";
 import { HotTable } from "@handsontable/react-wrapper";
 import { Text } from "@mantine/core";
 import { Handsontable } from "@/shared/lib/handsontable";
-import { nanoid } from "nanoid";
 
-interface TableOutputProps {
+// Props now expect a `data` property, matching our SDUI schema
+interface TableRendererProps {
   data: Record<string, any>[];
 }
 
-export default function TableOutput({ data }: TableOutputProps) {
-  // --- START OF DEFINITIVE FIX ---
-  // Hooks MUST be called at the top level, unconditionally.
+export default function TableRenderer({ data }: TableRendererProps) {
   const { colHeaders, columns, tableData } = useMemo(() => {
     if (!data || data.length === 0) {
       return { colHeaders: [], columns: [], tableData: [] };
     }
-
     const headers = Object.keys(data[0]);
     const columnSettings = headers.map((key) => ({
       data: key,
@@ -30,24 +26,21 @@ export default function TableOutput({ data }: TableOutputProps) {
         _col: number,
         _prop: string | number,
         value: any,
-        _cellProperties: Handsontable.CellProperties // Prefixed to ignore warning
+        _cellProperties: Handsontable.CellProperties
       ) => {
-        if (typeof value === "object" && value !== null) {
-          td.innerText = JSON.stringify(value);
-        } else {
-          td.innerText = String(value ?? "");
-        }
+        td.innerText =
+          typeof value === "object" && value !== null
+            ? JSON.stringify(value)
+            : String(value ?? "");
         return td;
       },
     }));
     return { colHeaders: headers, columns: columnSettings, tableData: data };
   }, [data]);
 
-  // Now that hooks are done, we can have an early return.
   if (!tableData || tableData.length === 0) {
     return <Text c="dimmed">No records to display.</Text>;
   }
-  // --- END OF DEFINITIVE FIX ---
 
   return (
     <div

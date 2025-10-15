@@ -171,11 +171,16 @@ export default function BlockComponent({ block }: BlockComponentProps) {
       mb="xl"
       withBorder
       onClick={() => setSelectedBlockId(block.id)}
+      // --- START: DEFINITIVE STYLING FIX ---
+      // Use a very light, almost white gray for the main card background
+      className="bg-gray-50 dark:bg-gray-900/50"
       style={{
-        border: isSelected
-          ? "1px solid var(--mantine-color-blue-6)"
-          : undefined,
+        borderColor: isSelected
+          ? "var(--mantine-color-blue-6)"
+          : "var(--mantine-color-gray-3)",
+        boxShadow: isSelected ? "0 0 8px rgba(34, 139, 230, 0.4)" : undefined,
       }}
+      // --- END: DEFINITIVE STYLING FIX ---
     >
       <Group justify="space-between" mb="xs">
         <Group gap="xs">
@@ -219,7 +224,7 @@ export default function BlockComponent({ block }: BlockComponentProps) {
               // back into a 'run' object if the engine is 'run'.
               updateBlockContent(block.id, value || "");
             }}
-            theme="vs-dark"
+            theme="light"
             options={{
               minimap: { enabled: false },
               fontSize: 13,

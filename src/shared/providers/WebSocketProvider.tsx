@@ -5,26 +5,28 @@ import React, {
   useContext,
   ReactNode,
   useCallback,
-  useState,
   useEffect,
-  useRef, // --- NEW: Import useRef for stability
 } from "react";
 import useReactWebSocket, { ReadyState } from "react-use-websocket";
 import { notifications } from "@mantine/notifications";
 import { useSessionStore } from "@/shared/store/useSessionStore";
-import { InboundMessage, ErrorPayload } from "@/shared/types/server";
+import { useConnectionStore } from "@/shared/store/useConnectionStore";
+import { InboundMessage, LogEventPayload } from "../api/types";
 
-// --- NEW: A helper to get a descriptive string for the ReadyState enum ---
-const readyStateToString = (readyState: ReadyState) => {
-  return {
-    [ReadyState.CONNECTING]: "Connecting",
-    [ReadyState.OPEN]: "Open",
-    [ReadyState.CLOSING]: "Closing",
-    [ReadyState.CLOSED]: "Closed",
-    [ReadyState.UNINSTANTIATED]: "Uninstantiated",
-  }[readyState];
+// Helper to get a descriptive string for the ReadyState enum
+const readyStateToString = (readyState: ReadyState): string => {
+  return (
+    {
+      [ReadyState.CONNECTING]: "Connecting",
+      [ReadyState.OPEN]: "Open",
+      [ReadyState.CLOSING]: "Closing",
+      [ReadyState.CLOSED]: "Closed",
+      [ReadyState.UNINSTANTIATED]: "Uninstantiated",
+    }[readyState] || "Unknown"
+  );
 };
 
+// --- TYPE DEFINITIONS ---
 type OutboundMessage = {
   type: string;
   command_id: string;
@@ -39,111 +41,130 @@ interface WebSocketContextType {
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
-  const [socketUrl, setSocketUrl] = useState<string | null>(null);
-  const { setLastJsonMessage, setBlockResult } = useSessionStore();
+  const getActiveProfile = useConnectionStore(
+    (state) => state.getActiveProfile
+  );
+  const activeProfile = getActiveProfile();
 
-  // This effect runs only once on the client to determine the URL.
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const host = window.location.host;
-      const url = `${protocol}//${host}/ws`;
-      setSocketUrl(url);
+  // --- START: DEFINITIVE CONNECTION LOGIC ---
+  // This IIFE (Immediately Invoked Function Expression) cleanly determines the correct URL.
+  const socketUrl = (() => {
+    // 1. If there is no active profile, we are truly disconnected. The URL must be null.
+    if (!activeProfile) {
+      return null;
     }
-  }, []);
+
+    // 2. If there IS an active profile, then we decide where to connect.
+    const useMock = process.env.NEXT_PUBLIC_USE_MOCK_SERVER === "true";
+
+    // If the mock flag is enabled in the environment, always use the mock server URL.
+    if (useMock) {
+      return "ws://localhost:8889";
+    }
+
+    // Otherwise, in a real environment, use the URL from the active connection profile.
+    return activeProfile.url;
+  })();
+  // --- END: DEFINITIVE CONNECTION LOGIC ---
+
+  const { setLastJsonMessage, setBlockResult } = useSessionStore();
 
   const { sendJsonMessage: sendBaseMessage, readyState } =
     useReactWebSocket<InboundMessage>(socketUrl, {
       onOpen: () => {
-        console.log("[WS] Connection established.");
+        const profileName = activeProfile?.name || "server";
+        console.log(`[WS] Connection established to ${profileName}.`);
         notifications.hide("ws-conn-error");
         notifications.show({
           id: "ws-conn-success",
           title: "Connected",
-          message: "Successfully connected to the cx-server.",
+          message: `Successfully connected to ${profileName}.`,
           color: "green",
           autoClose: 3000,
         });
       },
       onClose: (event) => {
+        const profileName = activeProfile?.name || "server";
         console.warn(
-          `[WS] Connection closed. Clean close: ${event.wasClean}, Code: ${event.code}`
+          `[WS] Connection to ${profileName} closed. Clean: ${event.wasClean}, Code: ${event.code}`
         );
-        notifications.show({
-          id: "ws-conn-error",
-          title: "Connection Lost",
-          message: "Attempting to reconnect...",
-          color: "red",
-          loading: true,
-          autoClose: false,
-          withCloseButton: false,
-        });
+        // Don't show the reconnecting notification if we intentionally disconnected
+        if (activeProfile) {
+          notifications.show({
+            id: "ws-conn-error",
+            title: `Connection to ${profileName} Lost`,
+            message: "Attempting to reconnect...",
+            color: "red",
+            loading: true,
+            autoClose: false,
+            withCloseButton: false,
+          });
+        }
       },
       onError: (event) => {
         console.error("[WS] WebSocket error observed:", event);
       },
       onMessage: (event) => {
-        // We can keep a minimal log for received messages if needed for debugging
-        // console.log("[WS] Received:", event.data);
         try {
           const parsedData: InboundMessage = JSON.parse(event.data);
 
-          if (parsedData.type === "BLOCK_RESULT") {
-            const { block_id, result } = parsedData.payload as any;
-            setBlockResult(block_id, { status: "success", payload: result });
-          } else if (parsedData.type === "BLOCK_STATUS_UPDATE") {
-            const { block_id, status, error } = parsedData.payload as any;
-            setBlockResult(block_id, {
-              status,
-              payload: error ? { error } : null,
-            });
-          } else if (
-            parsedData.type === "RESULT_ERROR" &&
-            parsedData.command_id.startsWith("run-block-")
-          ) {
-            const runningBlockId = Object.entries(
-              useSessionStore.getState().blockResults
-            ).find(([_id, res]) => res.status === "running")?.[0];
+          // Always pass the raw message to the session store for the Events tab to consume.
+          setLastJsonMessage(parsedData);
 
-            if (runningBlockId) {
-              setBlockResult(runningBlockId, {
-                status: "error",
-                payload: parsedData.payload as ErrorPayload,
-              });
+          // --- START: DEFINITIVE FIX FOR BLOCK STATUS TRANSLATION ---
+          // Check if this is a log event that also represents a block's execution status.
+          if (parsedData.type === "LOG_EVENT") {
+            const log = parsedData.payload as LogEventPayload;
+
+            // We only care about events from the ScriptEngine that have a block_id and a status.
+            const blockId = log.fields?.block_id;
+            const status = log.fields?.status;
+
+            if (log.labels.component === "ScriptEngine" && blockId && status) {
+              if (status === "success") {
+                const result = log.fields?.result;
+                console.log(`[WS] Translating SUCCESS for block: ${blockId}`);
+                setBlockResult(blockId, { status: "success", payload: result });
+              } else if (status === "error") {
+                const error = log.fields?.error;
+                console.log(`[WS] Translating ERROR for block: ${blockId}`);
+                setBlockResult(blockId, {
+                  status: "error",
+                  payload: { error },
+                });
+              } else {
+                // This will handle the 'running' status.
+                console.log(
+                  `[WS] Translating status '${status}' for block: ${blockId}`
+                );
+                setBlockResult(blockId, { status: status, payload: null });
+              }
             }
-            setLastJsonMessage(parsedData);
-          } else {
-            setLastJsonMessage(parsedData);
           }
+          // --- END: DEFINITIVE FIX ---
         } catch (e) {
           console.error("[WS] Error parsing message:", e);
         }
       },
-      // --- START: Stability and Reconnection Fixes ---
-      shouldReconnect: () => true, // Always attempt to reconnect
-      reconnectInterval: 3000, // Reconnect every 3 seconds
-      reconnectAttempts: 10, // Attempt up to 10 times before giving up
-      retryOnError: true, // Also try to reconnect on WebSocket errors
-      // This is the key fix for the "hot-reload-only" issue.
-      // It ensures that even if the connection closes unexpectedly (e.g., dev server restarts),
-      // the hook will re-establish it.
+      // --- Reconnection & Stability Options ---
+      shouldReconnect: () => !!activeProfile, // Only attempt to reconnect if a profile is active
+      reconnectInterval: 3000,
+      reconnectAttempts: 10,
+      retryOnError: true,
       share: true,
-      // This helps prevent duplicate connections in React 18's Strict Mode
-      // by ensuring only one underlying socket is created for this URL.
-      // --- END: Stability and Reconnection Fixes ---
       filter: () => socketUrl !== null,
     });
 
-  // Log ready state changes for debugging connection lifecycle
   useEffect(() => {
     console.log(
-      `[WS] Connection state changed to: ${readyStateToString(readyState)}`
+      `[WS] Connection state changed to: ${readyStateToString(
+        readyState
+      )} for URL: ${socketUrl}`
     );
-  }, [readyState]);
+  }, [readyState, socketUrl]);
 
   const sendMessage = useCallback(
     (message: OutboundMessage) => {
-      // Keep this log for development, it's very useful
       console.log("[WS] Sending:", message);
       if (readyState === ReadyState.OPEN) {
         sendBaseMessage(message);
@@ -153,7 +174,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         );
         notifications.show({
           title: "Connection Error",
-          message: "Cannot send command: Not connected to the cx-server.",
+          message: "Cannot send command: Not connected to the server.",
           color: "red",
         });
       }

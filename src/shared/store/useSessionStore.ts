@@ -1,43 +1,72 @@
 import { create } from "zustand";
-import { InboundMessage } from "@/shared/types/server";
 import { BlockResult, BlockResults, ContextualPage } from "../types/notebook";
+import { InboundMessage, InspectedArtifact } from "../api/types";
+
+// --- TYPE DEFINITIONS for state objects ---
 
 export interface ActiveConnection {
   alias: string;
   source: string;
 }
+
 export interface SessionVariable {
   name: string;
   type: string;
   preview: string;
 }
+
 export interface Flow {
   Name: string;
   Description: string;
 }
+
 export interface Query {
   Name: string;
 }
-export type PageParameters = Record<string, any>;
 
+export type PageParameters = Record<string, any>;
 export type ViewMode = "document" | "grid" | "graph";
 
 interface SessionStore {
+  // Core Session & Workspace Data
   connections: ActiveConnection[];
   variables: SessionVariable[];
   flows: Flow[];
   queries: Query[];
   lastJsonMessage: InboundMessage | null;
+
+  // Current Page & Execution State
   currentPage: ContextualPage | null;
   pageParameters: PageParameters;
   blockResults: BlockResults;
   selectedBlockId: string | null;
+
+  // UI Visibility State (Desktop Panels)
   isNavigatorVisible: boolean;
   isInspectorVisible: boolean;
-  isTerminalVisible: boolean;
+  isTerminalVisible: boolean; // This will become the "Activity Hub"
+
+  // --- START: NEW MOBILE & SPOTLIGHT STATE ---
+  // UI Visibility State (Mobile Drawers)
+  isNavDrawerOpen: boolean;
+  isInspectorDrawerOpen: boolean;
+
+  // UI Visibility State (Global Spotlight Modal)
+  isSpotlightVisible: boolean;
+  // --- END: NEW MOBILE & SPOTLIGHT STATE ---
+
+  // Notebook View Options
+  viewMode: ViewMode;
   showCodeBlocks: boolean;
   showMarkdownBlocks: boolean;
-  viewMode: ViewMode;
+
+  inspectedArtifacts: InspectedArtifact[];
+  addInspectedArtifact: (artifact: InspectedArtifact) => void;
+  removeInspectedArtifact: (id: string) => void;
+
+  // --- ACTIONS to modify the state ---
+
+  // Data Setters
   setConnections: (connections: ActiveConnection[]) => void;
   setVariables: (variables: SessionVariable[]) => void;
   setFlows: (flows: Flow[]) => void;
@@ -46,33 +75,58 @@ interface SessionStore {
   setCurrentPage: (page: ContextualPage | null) => void;
   setBlockResult: (blockId: string, result: BlockResult) => void;
   setSelectedBlockId: (blockId: string | null) => void;
-  toggleNavigator: () => void;
-  toggleInspector: () => void;
-  toggleTerminal: () => void;
+
+  // UI Toggles (Desktop)
+  toggleNavigator: (open?: boolean) => void;
+  toggleInspector: (open?: boolean) => void;
+  toggleTerminal: (open?: boolean) => void;
+  toggleNavDrawer: (open?: boolean) => void;
+  toggleInspectorDrawer: (open?: boolean) => void;
+
+  // UI Toggles (Spotlight)
+  openSpotlight: () => void;
+  closeSpotlight: () => void;
+  // --- END: NEW MOBILE & SPOTLIGHT ACTIONS ---
+
+  // Notebook View Actions
+  setViewMode: (mode: ViewMode) => void;
   toggleShowCodeBlocks: () => void;
   toggleShowMarkdownBlocks: () => void;
-  setShowOutputsOnly: (showOnly: boolean) => void; // A special action for the quick toggle
+  setShowOutputsOnly: (showOnly: boolean) => void;
+
+  // Content Updaters
   updateBlockContent: (blockId: string, newContent: string) => void;
   updatePageParameter: (key: string, value: any) => void;
-  setViewMode: (mode: ViewMode) => void;
 }
 
+// --- The `create` implementation of the store ---
+
 export const useSessionStore = create<SessionStore>((set) => ({
+  // Default initial state values
   connections: [],
   variables: [],
   flows: [],
   queries: [],
   lastJsonMessage: null,
-  currentPage: null, // Initialize new state
-  blockResults: {}, // Initialize new state
-  selectedBlockId: null, // Initialize new state
+  currentPage: null,
+  pageParameters: {},
+  blockResults: {},
+  selectedBlockId: null,
+
   isNavigatorVisible: true,
   isInspectorVisible: false,
   isTerminalVisible: false,
+
+  isNavDrawerOpen: false,
+  isInspectorDrawerOpen: false,
+  isSpotlightVisible: false,
+
+  viewMode: "document",
   showCodeBlocks: true,
   showMarkdownBlocks: true,
-  viewMode: "document",
-  pageParameters: {},
+  inspectedArtifacts: [],
+
+  // --- ACTION IMPLEMENTATIONS ---
   setConnections: (connections) => set({ connections }),
   setVariables: (variables) => set({ variables }),
   setFlows: (flows) => set({ flows }),
@@ -82,7 +136,6 @@ export const useSessionStore = create<SessionStore>((set) => ({
     const initialParams: PageParameters = {};
     if (page?.inputs) {
       for (const key in page.inputs) {
-        // Use the default value from the page's front matter
         initialParams[key] = page.inputs[key].default;
       }
     }
@@ -93,12 +146,44 @@ export const useSessionStore = create<SessionStore>((set) => ({
       blockResults: { ...state.blockResults, [blockId]: result },
     })),
   setSelectedBlockId: (blockId) => set({ selectedBlockId: blockId }),
-  toggleNavigator: () =>
-    set((state) => ({ isNavigatorVisible: !state.isNavigatorVisible })),
-  toggleInspector: () =>
-    set((state) => ({ isInspectorVisible: !state.isInspectorVisible })),
-  toggleTerminal: () =>
-    set((state) => ({ isTerminalVisible: !state.isTerminalVisible })),
+
+  toggleNavigator: (open) =>
+    set((state) => ({
+      isNavigatorVisible: open === undefined ? !state.isNavigatorVisible : open,
+    })),
+  toggleInspector: (open) =>
+    set((state) => ({
+      isInspectorVisible: open === undefined ? !state.isInspectorVisible : open,
+    })),
+  toggleTerminal: (open) =>
+    set((state) => ({
+      isTerminalVisible: open === undefined ? !state.isTerminalVisible : open,
+    })),
+
+  toggleNavDrawer: (open) =>
+    set((state) => ({
+      isNavDrawerOpen: open === undefined ? !state.isNavDrawerOpen : open,
+    })),
+  toggleInspectorDrawer: (open) =>
+    set((state) => ({
+      isInspectorDrawerOpen:
+        open === undefined ? !state.isInspectorDrawerOpen : open,
+    })),
+
+  openSpotlight: () => set({ isSpotlightVisible: true }),
+  closeSpotlight: () => set({ isSpotlightVisible: false }),
+
+  setViewMode: (mode) => set({ viewMode: mode }),
+  toggleShowCodeBlocks: () =>
+    set((state) => ({ showCodeBlocks: !state.showCodeBlocks })),
+  toggleShowMarkdownBlocks: () =>
+    set((state) => ({ showMarkdownBlocks: !state.showMarkdownBlocks })),
+  setShowOutputsOnly: (showOnly) =>
+    set({
+      showCodeBlocks: !showOnly,
+      showMarkdownBlocks: !showOnly,
+    }),
+
   updateBlockContent: (blockId, newContent) =>
     set((state) => {
       if (!state.currentPage) return {};
@@ -113,14 +198,17 @@ export const useSessionStore = create<SessionStore>((set) => ({
     set((state) => ({
       pageParameters: { ...state.pageParameters, [key]: value },
     })),
-  toggleShowCodeBlocks: () =>
-    set((state) => ({ showCodeBlocks: !state.showCodeBlocks })),
-  toggleShowMarkdownBlocks: () =>
-    set((state) => ({ showMarkdownBlocks: !state.showMarkdownBlocks })),
-  setShowOutputsOnly: (showOnly) =>
-    set({
-      showCodeBlocks: !showOnly,
-      showMarkdownBlocks: !showOnly,
-    }),
-  setViewMode: (mode) => set({ viewMode: mode }),
+
+  addInspectedArtifact: (artifact) =>
+    set((state) => ({
+      // Add the new artifact, preventing duplicates
+      inspectedArtifacts: [
+        ...state.inspectedArtifacts.filter((a) => a.id !== artifact.id),
+        artifact,
+      ],
+    })),
+  removeInspectedArtifact: (id) =>
+    set((state) => ({
+      inspectedArtifacts: state.inspectedArtifacts.filter((a) => a.id !== id),
+    })),
 }));

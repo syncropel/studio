@@ -1,6 +1,4 @@
-// /home/dpwanjala/repositories/cx-studio/src/shared/types/notebook.ts
-
-import { InboundMessage, InboundPayload } from "./server";
+import { InboundPayload } from "../api/types";
 
 export interface Block {
   id: string;
