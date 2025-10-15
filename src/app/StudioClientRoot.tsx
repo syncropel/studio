@@ -116,6 +116,7 @@ export default function StudioClientRoot() {
 
   // --- Main Content Render Logic ---
   const renderMainContent = () => {
+    // On first load, activeProfile will be null, and this condition will be true.
     if (!activeProfile) {
       return (
         <WelcomeScreen onConnectClick={() => setConnectionManagerOpen(true)} />

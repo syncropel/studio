@@ -48,23 +48,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
   // --- START: DEFINITIVE CONNECTION LOGIC ---
   // This IIFE (Immediately Invoked Function Expression) cleanly determines the correct URL.
-  const socketUrl = (() => {
-    // 1. If there is no active profile, we are truly disconnected. The URL must be null.
-    if (!activeProfile) {
-      return null;
-    }
-
-    // 2. If there IS an active profile, then we decide where to connect.
-    const useMock = process.env.NEXT_PUBLIC_USE_MOCK_SERVER === "true";
-
-    // If the mock flag is enabled in the environment, always use the mock server URL.
-    if (useMock) {
-      return "ws://localhost:8889";
-    }
-
-    // Otherwise, in a real environment, use the URL from the active connection profile.
-    return activeProfile.url;
-  })();
+  const socketUrl = activeProfile?.url ?? null;
   // --- END: DEFINITIVE CONNECTION LOGIC ---
 
   const { setLastJsonMessage, setBlockResult } = useSessionStore();

@@ -97,12 +97,12 @@ interface SessionStore {
   // Content Updaters
   updateBlockContent: (blockId: string, newContent: string) => void;
   updatePageParameter: (key: string, value: any) => void;
+  reset: () => void;
 }
 
 // --- The `create` implementation of the store ---
 
-export const useSessionStore = create<SessionStore>((set) => ({
-  // Default initial state values
+const initialState = {
   connections: [],
   variables: [],
   flows: [],
@@ -112,19 +112,21 @@ export const useSessionStore = create<SessionStore>((set) => ({
   pageParameters: {},
   blockResults: {},
   selectedBlockId: null,
-
   isNavigatorVisible: true,
   isInspectorVisible: false,
   isTerminalVisible: false,
-
   isNavDrawerOpen: false,
   isInspectorDrawerOpen: false,
   isSpotlightVisible: false,
-
-  viewMode: "document",
+  viewMode: "document" as ViewMode,
   showCodeBlocks: true,
   showMarkdownBlocks: true,
   inspectedArtifacts: [],
+};
+
+export const useSessionStore = create<SessionStore>((set) => ({
+  ...initialState,
+  // Default initial state values
 
   // --- ACTION IMPLEMENTATIONS ---
   setConnections: (connections) => set({ connections }),
@@ -211,4 +213,5 @@ export const useSessionStore = create<SessionStore>((set) => ({
     set((state) => ({
       inspectedArtifacts: state.inspectedArtifacts.filter((a) => a.id !== id),
     })),
+  reset: () => set(initialState),
 }));

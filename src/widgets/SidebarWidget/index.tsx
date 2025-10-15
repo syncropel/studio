@@ -289,9 +289,7 @@ export default function SidebarWidget({
 
   return (
     <aside
-      className={`h-full w-full flex flex-col bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800 transition-opacity ${
-        disabled ? "opacity-50 pointer-events-none" : ""
-      }`}
+      className={`h-full w-full flex flex-col bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800 transition-opacity`}
     >
       <Group
         justify="space-between"
@@ -307,7 +305,11 @@ export default function SidebarWidget({
           </ActionIcon>
         </Tooltip>
       </Group>
-      <ScrollArea className="flex-grow p-2">
+      <ScrollArea
+        className={`flex-grow p-2 transition-opacity ${
+          disabled ? "opacity-50 pointer-events-none" : ""
+        }`}
+      >
         {disabled ? (
           <Center h={200}>
             <Text c="dimmed" size="sm">

@@ -371,7 +371,7 @@ export const MOCK_WORKSPACE_DATA = {
   ],
 };
 
-const MOCK_RUN_HISTORY = [
+export const MOCK_RUN_HISTORY = [
   {
     run_id: "run-20251015-ABCDEFG",
     flow_id: "finance-project/monthly-report",
