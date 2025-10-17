@@ -1,123 +1,123 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/shared/api/types.ts
+//
+// Definitive Type Definitions for the Syncropel Communication Protocol (SCP/SEP) v1.0.0
+// This file is the canonical contract between the cx-studio client and the cx-server.
+
 import type { ContextualPage } from "@/shared/types/notebook";
 
-// --- PAYLOAD TYPES ---
+// ========================================================================
+//   SECTION 1: SERVER -> CLIENT EVENT PROTOCOL (SEP)
+// ========================================================================
 
-export type DataPayload = Record<string, unknown>;
+/**
+ * The main payload envelope for every server-to-client event.
+ * The actual data is nested inside the `fields` property.
+ */
+export interface SepPayload {
+  level: "debug" | "info" | "warn" | "error";
+  message: string;
+  fields?: Record<string, any>; // The structured data for the event
+  labels?: Record<string, string>;
+}
 
-export interface CommandResultPayload {
-  result: DataPayload | DataPayload[] | string | null;
+/**
+ * The top-level message envelope for every server-to-client event.
+ */
+export interface InboundMessage {
+  command_id: string; // Correlates to the client command that initiated this
+  id: string; // Unique ID for this specific event
+  type: string; // The event type, e.g., "BLOCK.OUTPUT"
+  source: string;
+  timestamp: string;
+  payload: SepPayload; // The payload is now this structured envelope
+}
+
+// --- Specific `fields` Schemas for Block Events ---
+
+export interface BlockStatusFields {
+  block_id: string;
+  status: "running" | "pending" | "skipped";
+}
+
+// The "Claim Check" for large data artifacts, sent via the Data Plane
+export interface DataRef {
+  artifact_id: string;
+  renderer_hint: string;
+  metadata?: Record<string, any>;
+  access_url: string;
+}
+
+// The output of a block, implementing the Hybrid Claim Check pattern
+export interface BlockOutput {
+  inline_data?: SDUIPayload; // For small results
+  data_ref?: DataRef; // For large results
+}
+
+export interface BlockOutputFields {
+  block_id: string;
+  status: "success";
+  duration_ms: number;
+  output: BlockOutput;
+}
+
+export interface BlockErrorFields {
+  block_id: string;
+  status: "error";
+  duration_ms: number;
+  error: {
+    message: string;
+    traceback?: string;
+  };
+}
+
+// --- Specific `fields` Schemas for Other Events ---
+
+export interface SessionLoadedFields {
   new_session_state: {
     connections: { alias: string; source: string }[];
     variables: { name: string; type: string; preview: string }[];
   };
 }
 
-export interface ErrorPayload {
-  error: string;
+export interface PageLoadedFields {
+  page: ContextualPage;
 }
 
-export interface LogEventPayload {
-  level: "debug" | "info" | "warn" | "error";
-  timestamp: string;
-  message: string;
-  labels: { [key: string]: any };
-  fields?: Record<string, any>;
-}
-
-export interface RunHistoryItem {
-  run_id: string;
-  flow_id: string;
-  status: string;
-  timestamp_utc: string;
-  parameters: Record<string, any>;
-}
-
-export interface RunDetail {
-  run_id: string;
-  flow_id: string;
-  status: string;
-  timestamp_utc: string;
-  parameters: Record<string, any>;
-  steps: {
-    id: string;
-    status: string;
-    duration_ms: number;
-    cache_hit: boolean;
-  }[];
-  artifacts: { name: string; size_bytes: number }[];
-}
-
-export interface InspectedArtifact {
-  id: string;
-  runId: string;
-  artifactName: string;
-  content: any;
-  type: "table" | "image" | "json" | "unknown";
-}
-
-// Add these interfaces to your existing api/types.ts file.
-
-// --- SYNCROPEL DECLARATIVE UI (SDUI) PROTOCOL ---
-
-/**
- * Defines a generic action that can be triggered by a UI element, like a button.
- */
-export interface SDUIAction {
-  type: "run_block"; // The only action type for now
-  payload: {
-    target: string; // The ID of the block to run
-    // Future: could include params to pass to the block
+export interface WorkspaceBrowseResultFields {
+  path: string;
+  data: {
+    projects: any[]; // Define more strictly if needed
+    library: any[];
   };
 }
 
-/**
- * Base interface for a simple UI element within a form or layout.
- */
-export interface SDUIElement {
-  type: "text" | "text_input" | "number_input" | "select" | "button";
-  variable?: string; // The key for this element's value in a form's state
+export interface HomepageDataResultFields {
+  recent_files: any[];
+  pinned_items: any[];
+  discover_items: any[];
 }
 
-// --- Specific Element Types ---
+// ========================================================================
+//   SECTION 2: SYNCROPEL DECLARATIVE UI (SDUI) SCHEMAS
+// ========================================================================
+// These types define the contract for the server to declaratively render UI
+// components on the client.
 
-export interface SDUITextElement extends SDUIElement {
-  type: "text";
-  content: string; // The text to display, can be markdown
-}
-
-export interface SDUITextInputElement extends SDUIElement {
-  type: "text_input";
-  label: string;
-  placeholder?: string;
-  defaultValue?: string;
-}
-
-export interface SDUIButtonElement extends SDUIElement {
-  type: "button";
-  label: string;
-  action: SDUIAction;
-  disabled?: string; // A Jinja-like expression to be evaluated on the client
-}
-
-export type SDUIFormElement =
-  | SDUITextInputElement
-  | SDUIButtonElement
-  | SDUITextElement;
-
-// --- PAYLOADS FOR TOP-LEVEL UI COMPONENTS (The "ui_component" property) ---
-
-/**
- * The base for all top-level SDUI components.
- */
 export interface SDUIPayloadBase {
-  ui_component: string; // e.g., 'table', 'card', 'my-app:my-chart'
+  ui_component: string;
   props?: Record<string, any>;
 }
 
-/**
- * Renders a simple metric card.
- * ui_component: "card"
- */
+export interface SDUITablePayload extends SDUIPayloadBase {
+  ui_component: "table";
+  props: { data: Record<string, any>[] };
+}
+
+export interface SDUIJsonPayload extends SDUIPayloadBase {
+  ui_component: "json";
+  props: { data: any };
+}
+
 export interface SDUICardPayload extends SDUIPayloadBase {
   ui_component: "card";
   props: {
@@ -128,134 +128,29 @@ export interface SDUICardPayload extends SDUIPayloadBase {
   };
 }
 
-/**
- * Renders a data table (e.g., using Handsontable).
- * ui_component: "table"
- */
-export interface SDUITablePayload extends SDUIPayloadBase {
-  ui_component: "table";
-  props: {
-    data: Record<string, any>[];
-    // Future: add options for pagination, sorting etc.
-  };
-}
 export interface SDUIImagePayload extends SDUIPayloadBase {
   ui_component: "image";
-  props: {
-    src: string;
-    alt?: string;
-  };
-}
-/**
- * Renders a syntax-highlighted JSON viewer (e.g., using Monaco).
- * ui_component: "json"
- */
-export interface SDUIJsonPayload extends SDUIPayloadBase {
-  ui_component: "json";
-  props: {
-    data: any;
-  };
+  props: { src: string; alt?: string };
 }
 
-/**
- * Renders a hierarchical tree view.
- * ui_component: "tree"
- */
-export interface SDUITreePayload extends SDUIPayloadBase {
-  ui_component: "tree";
-  props: {
-    title?: string;
-    data: any[]; // Expects an array of nodes with key, title, children
-  };
-}
+// Add other SDUI component types here (Tree, Form, etc.)
 
-/**
- * Renders a form from a list of elements.
- * ui_component: "form"
- */
-export interface SDUIFormPayload extends SDUIPayloadBase {
-  ui_component: "form";
-  title?: string;
-  elements: SDUIFormElement[];
-}
-
-/**
- * Renders a layout by composing other SDUI components.
- * ui_component: "layout"
- */
-export interface SDUILayoutPayload extends SDUIPayloadBase {
-  ui_component: "layout";
-  layout_type: "grid" | "stack" | "tabs";
-  // Each child is a full SDUI schema itself.
-  children: SDUIPayload[];
-  // Grid-specific props
-  columns?: number;
-}
-
-/**
- * Renders a custom, user-provided React component.
- * This is triggered by a block with `engine: "custom-component"`
- */
-export interface SDUICustomComponentPayload extends SDUIPayloadBase {
-  // The component name is namespaced: "app-name:ComponentName"
-  ui_component: `${string}:${string}`;
-  props: Record<string, any>;
-}
-
-export interface SDUITextPayload extends SDUIPayloadBase {
-  ui_component: "text";
-  props: {
-    content: string;
-  };
-}
-
-/**
- * The master discriminated union for all possible UI rendering payloads.
- * The `DynamicUIRenderer` will use the `ui_component` property to decide which
- * component to render.
- */
+// The master discriminated union for all possible SDUI payloads.
 export type SDUIPayload =
-  | SDUICardPayload
   | SDUITablePayload
   | SDUIJsonPayload
-  | SDUITreePayload
-  | SDUIFormPayload
-  | SDUILayoutPayload
-  | SDUICustomComponentPayload
+  | SDUICardPayload
   | SDUIImagePayload
-  | SDUITextPayload;
+  | SDUIPayloadBase; // Fallback for custom components
 
-// The master union of all possible payload shapes
-export type InboundPayload =
-  | CommandResultPayload
-  | ErrorPayload
-  | DataPayload
-  | DataPayload[]
-  | ContextualPage
-  | LogEventPayload
-  | RunHistoryItem[]
-  | RunDetail
-  | InspectedArtifact
-  | SDUIPayload;
-
-// --- MESSAGE TYPE DEFINITION ---
-
-export interface InboundMessage {
-  type:
-    | "COMMAND_STARTED"
-    | "RESULT_SUCCESS"
-    | "RESULT_ERROR"
-    | "PAGE_LOADED"
-    | "SESSION_LOADED"
-    | "WORKSPACE_BROWSE_RESULT"
-    | "HOMEPAGE_DATA_RESULT"
-    | "PAGE_SAVED"
-    | "LOG_EVENT"
-    | "FATAL_ERROR"
-    | "TERMINAL_OUTPUT"
-    | "RUN_HISTORY_RESULT"
-    | "RUN_DETAIL_RESULT"
-    | "ARTIFACT_CONTENT_RESULT";
-  command_id: string;
-  payload: InboundPayload;
+/**
+ * Defines the shape of an artifact's content when it's fetched for preview
+ * in the Inspector panel. This is the expected payload for an ARTIFACT_CONTENT_RESULT event.
+ */
+export interface InspectedArtifact {
+  id: string; // A unique ID for the preview, usually `${runId}-${artifactName}`
+  runId: string;
+  artifactName: string;
+  content: any; // The actual fetched content (JSON object, text, etc.)
+  type: "table" | "image" | "json" | "text" | "unknown"; // A hint for rendering
 }

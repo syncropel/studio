@@ -1,3 +1,4 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/widgets/Spotlight/index.tsx
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -19,45 +20,26 @@ import {
   IconDatabase,
   IconBulb,
   IconPlus,
+  IconSparkles,
 } from "@tabler/icons-react";
 import { useSessionStore } from "@/shared/store/useSessionStore";
 import { useWebSocket } from "@/shared/providers/WebSocketProvider";
 import { nanoid } from "nanoid";
+import { ReadyState } from "react-use-websocket";
 
-// --- TYPE DEFINITIONS ---
-// Exporting this type allows parent components to be strongly-typed.
 export type HomepageItem = {
   id: string;
-  type:
-    | "page"
-    | "query"
-    | "flow"
-    | "connection"
-    | "command"
-    | "external_link"
-    | "tip";
+  type: string;
   title: string;
   description: string;
-  timestamp?: string;
   icon: string;
-  action: {
-    type:
-      | "open_page"
-      | "open_connection_editor"
-      | "run_command"
-      | "open_external_url";
-    payload: any;
-  };
+  action: { type: string; payload: any };
 };
 
-// Define the props that this component accepts from its parent.
 interface SpotlightProps {
   onItemClick: (item: HomepageItem) => void;
 }
 
-// --- HELPER COMPONENTS ---
-
-// A small, memoized component to prevent re-rendering all icons on every state change.
 const ItemIcon = React.memo(({ iconName }: { iconName: string }) => {
   switch (iconName) {
     case "IconFileCode":
@@ -70,52 +52,37 @@ const ItemIcon = React.memo(({ iconName }: { iconName: string }) => {
       return <IconBulb size={18} />;
     case "IconPlus":
       return <IconPlus size={18} />;
+    case "IconSparkles":
+      return <IconSparkles size={18} />;
     default:
       return <IconFileCode size={18} />;
   }
 });
 ItemIcon.displayName = "ItemIcon";
 
-// --- MAIN COMPONENT ---
-
 export default function Spotlight({ onItemClick }: SpotlightProps) {
-  // Get state and actions from our hooks.
-  const { lastJsonMessage } = useSessionStore();
-  const { sendJsonMessage } = useWebSocket();
-
-  // Local state for the component's UI.
+  const { homepageData, isHomepageLoading, setIsHomepageLoading } =
+    useSessionStore();
+  const { sendJsonMessage, readyState } = useWebSocket();
   const [activeTab, setActiveTab] = useState("Continue");
-  const [isLoading, setIsLoading] = useState(true);
-  const [data, setData] = useState<{
-    recent_files: HomepageItem[];
-    pinned_items: HomepageItem[];
-    discover_items: HomepageItem[];
-  }>({ recent_files: [], pinned_items: [], discover_items: [] });
 
-  // --- DATA FETCHING ---
-  // Fetch data on component mount.
+  // --- REFACTORED DATA FETCHING LOGIC ---
   useEffect(() => {
-    setIsLoading(true);
-    sendJsonMessage({
-      type: "GET_HOMEPAGE_DATA",
-      command_id: `get-home-data-${nanoid()}`,
-      payload: {},
-    });
-  }, [sendJsonMessage]);
-
-  // Handle incoming data from the WebSocket and update local state.
-  useEffect(() => {
-    if (lastJsonMessage?.type === "HOMEPAGE_DATA_RESULT") {
-      setData(lastJsonMessage.payload as any);
-      setIsLoading(false);
+    // This condition is now declarative and robust:
+    // "If we are connected, and we don't have any data yet, then we are in a loading state and should fetch."
+    if (readyState === ReadyState.OPEN && !homepageData) {
+      setIsHomepageLoading(true);
+      sendJsonMessage({
+        type: "HOMEPAGE.GET_DATA",
+        command_id: `get-home-data-${nanoid()}`,
+        payload: {},
+      });
     }
-  }, [lastJsonMessage]);
+  }, [readyState, homepageData, sendJsonMessage, setIsHomepageLoading]);
 
-  // --- RENDER LOGIC ---
-
-  // Renders a single list item.
-  const renderItems = (items: HomepageItem[]) => {
-    if (items.length === 0) {
+  // Render logic remains the same
+  const renderItems = (items: HomepageItem[] | undefined) => {
+    if (!items || items.length === 0) {
       return (
         <Text c="dimmed" size="sm" ta="center" mt="xl">
           Nothing to show here.
@@ -145,18 +112,16 @@ export default function Spotlight({ onItemClick }: SpotlightProps) {
     ));
   };
 
-  // Determines which list of data to show based on the active tab.
   const getVisibleData = () => {
+    if (!homepageData) return [];
     switch (activeTab) {
       case "Pinned":
-        return data.pinned_items;
+        return homepageData.pinned_items;
       case "Discover":
-        return data.discover_items;
-      // TODO: Add a "Create New" data source
-      // case 'Create New': return CREATE_NEW_ITEMS;
+        return homepageData.discover_items;
       case "Continue":
       default:
-        return data.recent_files;
+        return homepageData.recent_files;
     }
   };
 
@@ -166,11 +131,11 @@ export default function Spotlight({ onItemClick }: SpotlightProps) {
         placeholder="What do you want to do or find?"
         size="lg"
         leftSection={<IconSearch size={20} />}
+        rightSection={<Kbd>Ctrl+K</Kbd>}
         mb="xl"
         autoFocus
         className="w-full"
       />
-
       <Group mb="md" gap="xs">
         <Button
           size="xs"
@@ -190,6 +155,7 @@ export default function Spotlight({ onItemClick }: SpotlightProps) {
           size="xs"
           variant={activeTab === "Create New" ? "light" : "subtle"}
           onClick={() => setActiveTab("Create New")}
+          disabled
         >
           Create New
         </Button>
@@ -202,7 +168,7 @@ export default function Spotlight({ onItemClick }: SpotlightProps) {
         </Button>
       </Group>
 
-      {isLoading ? (
+      {isHomepageLoading ? (
         <Center h={100}>
           <Loader />
         </Center>

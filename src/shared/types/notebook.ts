@@ -1,4 +1,11 @@
-import { InboundPayload } from "../api/types";
+// Import the definitive "fields" types from our API contract.
+import {
+  BlockStatusFields,
+  BlockOutputFields,
+  BlockErrorFields,
+} from "../api/types";
+
+// --- CORE NOTEBOOK STRUCTURES ---
 
 export interface Block {
   id: string;
@@ -28,14 +35,11 @@ export interface ContextualPage {
   blocks: Block[];
 }
 
-// --- START OF DEFINITIVE FIX ---
-// The payload can be the success data, or a simple error object.
-export type BlockResultPayload = InboundPayload | { error: string } | null;
-
-export type BlockResult = {
-  status: "pending" | "running" | "success" | "error";
-  payload: BlockResultPayload; // This field now holds the data or the error
-};
-// --- END OF DEFINITIVE FIX ---
-
-export type BlockResults = Record<string, BlockResult>;
+// --- NEW, DEFINITIVE BLOCK RESULT TYPE ---
+// This is now the single source of truth for what a block's result looks like.
+// It's a union of the possible `fields` objects from server events.
+export type BlockResult =
+  | { status: "pending" } // A local-only initial state
+  | BlockStatusFields // { status: 'running' | 'skipped', ... }
+  | BlockOutputFields // { status: 'success', output: ..., ... }
+  | BlockErrorFields; // { status: 'error', error: ..., ... }

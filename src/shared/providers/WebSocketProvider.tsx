@@ -9,11 +9,19 @@ import React, {
 } from "react";
 import useReactWebSocket, { ReadyState } from "react-use-websocket";
 import { notifications } from "@mantine/notifications";
-import { useSessionStore } from "@/shared/store/useSessionStore";
-import { useConnectionStore } from "@/shared/store/useConnectionStore";
-import { InboundMessage, LogEventPayload } from "../api/types";
 
-// Helper to get a descriptive string for the ReadyState enum
+// Import the specific stores and types we will interact with
+import { useConnectionStore } from "@/shared/store/useConnectionStore";
+import { useSessionStore } from "@/shared/store/useSessionStore";
+import {
+  InboundMessage,
+  SessionLoadedFields,
+  HomepageDataResultFields,
+  WorkspaceBrowseResultFields,
+} from "../api/types";
+import { ContextualPage } from "../types/notebook";
+
+// Helper for logging connection state (unchanged)
 const readyStateToString = (readyState: ReadyState): string => {
   return (
     {
@@ -26,7 +34,7 @@ const readyStateToString = (readyState: ReadyState): string => {
   );
 };
 
-// --- TYPE DEFINITIONS ---
+// Type definitions (unchanged)
 type OutboundMessage = {
   type: string;
   command_id: string;
@@ -41,17 +49,20 @@ interface WebSocketContextType {
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
-  const getActiveProfile = useConnectionStore(
-    (state) => state.getActiveProfile
-  );
-  const activeProfile = getActiveProfile();
-
-  // --- START: DEFINITIVE CONNECTION LOGIC ---
-  // This IIFE (Immediately Invoked Function Expression) cleanly determines the correct URL.
+  const activeProfile = useConnectionStore((state) => state.getActiveProfile());
   const socketUrl = activeProfile?.url ?? null;
-  // --- END: DEFINITIVE CONNECTION LOGIC ---
 
-  const { setLastJsonMessage, setBlockResult } = useSessionStore();
+  // Get all necessary state update actions from our sliced stores.
+  // This is the core of the new pattern.
+  const {
+    setLastJsonMessage,
+    setBlockResult,
+    setCurrentPage,
+    setConnections,
+    setVariables,
+    handleWorkspaceBrowseResult,
+    setHomepageData,
+  } = useSessionStore.getState(); // Use .getState() for use outside of React components
 
   const { sendJsonMessage: sendBaseMessage, readyState } =
     useReactWebSocket<InboundMessage>(socketUrl, {
@@ -66,13 +77,19 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           color: "green",
           autoClose: 3000,
         });
+
+        // On successful connection, immediately initialize the session
+        sendBaseMessage({
+          type: "SESSION.INIT",
+          command_id: `session-init-${Date.now()}`,
+          payload: {},
+        });
       },
       onClose: (event) => {
         const profileName = activeProfile?.name || "server";
         console.warn(
           `[WS] Connection to ${profileName} closed. Clean: ${event.wasClean}, Code: ${event.code}`
         );
-        // Don't show the reconnecting notification if we intentionally disconnected
         if (activeProfile) {
           notifications.show({
             id: "ws-conn-error",
@@ -88,50 +105,84 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       onError: (event) => {
         console.error("[WS] WebSocket error observed:", event);
       },
+
+      // ========================================================================
+      //   THE NEW, CENTRALIZED `onMessage` DISPATCHER
+      // ========================================================================
       onMessage: (event) => {
         try {
-          const parsedData: InboundMessage = JSON.parse(event.data);
+          const message: InboundMessage = JSON.parse(event.data);
+          setLastJsonMessage(message);
 
-          // Always pass the raw message to the session store for the Events tab to consume.
-          setLastJsonMessage(parsedData);
+          const { type, payload } = message;
+          const fields = payload.fields;
 
-          // --- START: DEFINITIVE FIX FOR BLOCK STATUS TRANSLATION ---
-          // Check if this is a log event that also represents a block's execution status.
-          if (parsedData.type === "LOG_EVENT") {
-            const log = parsedData.payload as LogEventPayload;
-
-            // We only care about events from the ScriptEngine that have a block_id and a status.
-            const blockId = log.fields?.block_id;
-            const status = log.fields?.status;
-
-            if (log.labels.component === "ScriptEngine" && blockId && status) {
-              if (status === "success") {
-                const result = log.fields?.result;
-                console.log(`[WS] Translating SUCCESS for block: ${blockId}`);
-                setBlockResult(blockId, { status: "success", payload: result });
-              } else if (status === "error") {
-                const error = log.fields?.error;
-                console.log(`[WS] Translating ERROR for block: ${blockId}`);
-                setBlockResult(blockId, {
-                  status: "error",
-                  payload: { error },
-                });
-              } else {
-                // This will handle the 'running' status.
-                console.log(
-                  `[WS] Translating status '${status}' for block: ${blockId}`
-                );
-                setBlockResult(blockId, { status: status, payload: null });
+          switch (type) {
+            case "BLOCK.STATUS":
+            case "BLOCK.OUTPUT":
+            case "BLOCK.ERROR":
+              if (fields?.block_id) {
+                setBlockResult(fields.block_id, fields as any);
               }
-            }
+              break;
+
+            case "PAGE.LOADED":
+              if (fields) {
+                // Simplified: The fields object is the page.
+                setCurrentPage(fields as ContextualPage);
+              }
+              break;
+
+            case "SESSION.LOADED":
+              if (fields) {
+                // --- THIS IS THE FIX ---
+                // The `fields` object IS the session state.
+
+                const { new_session_state } = fields as SessionLoadedFields;
+                if (new_session_state) {
+                  setConnections(new_session_state.connections);
+                  setVariables(new_session_state.variables);
+                }
+              }
+              break;
+
+            case "WORKSPACE.BROWSE_RESULT":
+              if (fields) {
+                handleWorkspaceBrowseResult(fields as any);
+              }
+              break;
+
+            // --- FIX 2: Correct Naming Convention ---
+            case "HOMEPAGE.DATA_RESULT":
+              if (fields) {
+                setHomepageData(fields as HomepageDataResultFields);
+              }
+              break;
+
+            case "SYSTEM.ERROR":
+              notifications.show({
+                title: "Server Error",
+                message: payload.message,
+                color: "red",
+              });
+              break;
+
+            default:
+              console.log(
+                `[WS] Received unhandled/log-only event type: ${type}`
+              );
           }
-          // --- END: DEFINITIVE FIX ---
         } catch (e) {
-          console.error("[WS] Error parsing message:", e);
+          console.error(
+            "[WS] Fatal error parsing message:",
+            e,
+            "Raw data:",
+            event.data
+          );
         }
       },
-      // --- Reconnection & Stability Options ---
-      shouldReconnect: () => !!activeProfile, // Only attempt to reconnect if a profile is active
+
+      shouldReconnect: () => !!activeProfile,
       reconnectInterval: 3000,
       reconnectAttempts: 10,
       retryOnError: true,

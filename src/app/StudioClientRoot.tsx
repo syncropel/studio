@@ -1,17 +1,25 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader, Center, Modal, Box, Drawer, Text } from "@mantine/core";
 import { useHotkeys, useMediaQuery } from "@mantine/hooks";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { ReadyState } from "react-use-websocket";
-
-import { useIsClient } from "@/shared/hooks/useIsClient";
-import { useSessionStore } from "@/shared/store/useSessionStore";
-import { useConnectionStore } from "@/shared/store/useConnectionStore";
-import { useWebSocket } from "@/shared/providers/WebSocketProvider";
 import { nanoid } from "nanoid";
+
+// --- HOOKS & STORES ---
+// Custom hook to ensure client-side rendering
+import { useIsClient } from "@/shared/hooks/useIsClient";
+// Sliced Zustand stores for clean state management
+import { useSessionStore } from "@/shared/store/useSessionStore";
+import { useSettingsStore } from "@/shared/store/useSettingsStore";
+import { useUIStateStore } from "@/shared/store/useUIStateStore";
+import { useConnectionStore } from "@/shared/store/useConnectionStore";
+// WebSocket provider for server communication
+import { useWebSocket } from "@/shared/providers/WebSocketProvider";
+
+// Type definitions
 import type { HomepageItem } from "@/widgets/Spotlight";
 
 // --- WIDGET IMPORTS ---
@@ -29,32 +37,34 @@ import WelcomeScreen from "@/widgets/WelcomeScreen";
 export default function StudioClientRoot() {
   // --- CORE HOOKS ---
   const router = useRouter();
-  const searchParams = useSearchParams(); // Now safe to use in a Client Component
+  const searchParams = useSearchParams();
   const isClient = useIsClient();
   const isMobile = useMediaQuery("(max-width: 768px)");
   const initialLoadHandled = useRef(false);
 
-  // --- GLOBAL STATE & ACTIONS ---
-  const { currentPage, ...sessionActions } = useSessionStore();
+  // --- STATE MANAGEMENT ---
+  // Read state and actions from our new, sliced Zustand stores.
+  // This makes dependencies explicit and improves performance.
+  const { currentPage } = useSessionStore();
   const { getActiveProfile } = useConnectionStore();
-  const { sendJsonMessage, readyState } = useWebSocket();
-  const [isConnectionManagerOpen, setConnectionManagerOpen] = useState(false);
-
+  const { isNavigatorVisible, isInspectorVisible, isTerminalVisible } =
+    useSettingsStore();
   const {
-    isNavigatorVisible,
-    isInspectorVisible,
-    isTerminalVisible,
     isSpotlightVisible,
+    isConnectionManagerOpen,
     isNavDrawerOpen,
     isInspectorDrawerOpen,
     openSpotlight,
     closeSpotlight,
+    toggleConnectionManager,
     toggleNavDrawer,
     toggleInspectorDrawer,
-  } = sessionActions;
+  } = useUIStateStore();
 
+  const { sendJsonMessage, readyState } = useWebSocket();
   const activeProfile = getActiveProfile();
 
+  // --- HOTKEYS & SIDE EFFECTS ---
   useHotkeys([
     [
       "mod+K",
@@ -65,25 +75,26 @@ export default function StudioClientRoot() {
     ],
   ]);
 
-  // --- SIDE EFFECTS for URL Syncing ---
+  // Effect for handling initial page load from URL query parameter
   useEffect(() => {
     if (
       isClient &&
       readyState === ReadyState.OPEN &&
       !initialLoadHandled.current
     ) {
-      const pageNameFromUrl = searchParams.get("page");
-      if (pageNameFromUrl) {
+      const pageIdFromUrl = searchParams.get("page");
+      if (pageIdFromUrl) {
         sendJsonMessage({
-          type: "LOAD_PAGE",
+          type: "PAGE.LOAD",
           command_id: `load-page-from-url-${nanoid()}`,
-          payload: { page_name: pageNameFromUrl },
+          payload: { page_id: pageIdFromUrl },
         });
       }
       initialLoadHandled.current = true;
     }
   }, [isClient, readyState, searchParams, sendJsonMessage]);
 
+  // Effect for keeping the browser URL in sync with the current page state
   useEffect(() => {
     if (!isClient) return;
     const pageInUrl = searchParams.get("page");
@@ -94,19 +105,22 @@ export default function StudioClientRoot() {
     }
   }, [currentPage, searchParams, router, isClient]);
 
-  const handleModalItemClick = (item: HomepageItem) => {
+  // --- EVENT HANDLERS ---
+  const handleSpotlightItemClick = (item: HomepageItem) => {
     closeSpotlight();
     if (item.action.type === "open_page") {
       sendJsonMessage({
-        type: "LOAD_PAGE",
+        type: "PAGE.LOAD",
         command_id: `load-page-${nanoid()}`,
-        payload: { page_name: item.action.payload.path },
+        payload: { page_id: item.action.payload.page_id },
       });
     }
   };
 
+  // --- RENDER LOGIC ---
+
+  // Server-side rendering fallback
   if (!isClient) {
-    // This will be shown briefly by the parent Suspense, but is good practice as a fallback.
     return (
       <Center h="100vh">
         <Loader />
@@ -114,12 +128,11 @@ export default function StudioClientRoot() {
     );
   }
 
-  // --- Main Content Render Logic ---
+  // Main content switcher based on connection and page state
   const renderMainContent = () => {
-    // On first load, activeProfile will be null, and this condition will be true.
     if (!activeProfile) {
       return (
-        <WelcomeScreen onConnectClick={() => setConnectionManagerOpen(true)} />
+        <WelcomeScreen onConnectClick={() => toggleConnectionManager(true)} />
       );
     }
     if (readyState === ReadyState.CONNECTING) {
@@ -133,6 +146,7 @@ export default function StudioClientRoot() {
     if (readyState === ReadyState.OPEN) {
       return currentPage ? <Notebook /> : <Homepage />;
     }
+    // Default to a disconnected/error state
     return (
       <Center h="100%" className="p-4">
         <Text c="red" ta="center">
@@ -148,8 +162,10 @@ export default function StudioClientRoot() {
 
   const isConnected = readyState === ReadyState.OPEN;
 
+  // --- MAIN COMPONENT JSX ---
   return (
     <main className="relative h-screen w-screen flex flex-col bg-white dark:bg-gray-950 text-black dark:text-white overflow-hidden">
+      {/* --- MODALS & DRAWERS (Global Overlays) --- */}
       <Modal
         opened={isSpotlightVisible}
         onClose={closeSpotlight}
@@ -162,13 +178,13 @@ export default function StudioClientRoot() {
         }}
       >
         <Box className="bg-white dark:bg-gray-900 p-4 rounded-lg shadow-2xl ring-1 ring-black/5 dark:ring-white/10">
-          <Spotlight onItemClick={handleModalItemClick} />
+          <Spotlight onItemClick={handleSpotlightItemClick} />
         </Box>
       </Modal>
 
       <Modal
         opened={isConnectionManagerOpen}
-        onClose={() => setConnectionManagerOpen(false)}
+        onClose={() => toggleConnectionManager(false)}
         title="Connection Manager"
         size="lg"
         centered
@@ -186,7 +202,7 @@ export default function StudioClientRoot() {
             size="85%"
           >
             <SidebarWidget
-              onConnectionClick={() => setConnectionManagerOpen(true)}
+              onConnectionClick={() => toggleConnectionManager(true)}
               disabled={!isConnected}
             />
           </Drawer>
@@ -203,6 +219,7 @@ export default function StudioClientRoot() {
         </>
       )}
 
+      {/* --- MAIN LAYOUT --- */}
       <TopBar />
 
       <div
@@ -216,7 +233,7 @@ export default function StudioClientRoot() {
                 <>
                   <Panel defaultSize={20} minSize={15} maxSize={40}>
                     <SidebarWidget
-                      onConnectionClick={() => setConnectionManagerOpen(true)}
+                      onConnectionClick={() => toggleConnectionManager(true)}
                       disabled={!isConnected}
                     />
                   </Panel>

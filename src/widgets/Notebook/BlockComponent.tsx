@@ -28,6 +28,7 @@ import { Block } from "@/shared/types/notebook";
 import { useWebSocket } from "@/shared/providers/WebSocketProvider";
 import { useSessionStore } from "@/shared/store/useSessionStore";
 import OutputViewer from "@/widgets/OutputViewer";
+import { useSettingsStore } from "@/shared/store/useSettingsStore";
 
 interface BlockComponentProps {
   block: Block;
@@ -44,12 +45,12 @@ export default function BlockComponent({ block }: BlockComponentProps) {
     selectedBlockId,
     setSelectedBlockId,
     updateBlockContent,
-    isInspectorVisible,
-    toggleInspector,
     pageParameters,
     showCodeBlocks,
     showMarkdownBlocks,
   } = useSessionStore();
+
+  const { isInspectorVisible, toggleInspector } = useSettingsStore();
 
   const blockResult = blockResults[block.id];
   const isSelected = selectedBlockId === block.id;
@@ -60,9 +61,10 @@ export default function BlockComponent({ block }: BlockComponentProps) {
   const handleRun = () => {
     if (!currentPage?.id) return;
 
-    useSessionStore
-      .getState()
-      .setBlockResult(block.id, { status: "running", payload: null });
+    useSessionStore.getState().setBlockResult(block.id, {
+      block_id: block.id,
+      status: "running",
+    });
 
     // --- START OF DEFINITIVE FIX ---
     // Find the most up-to-date version of the block from the store
@@ -71,14 +73,18 @@ export default function BlockComponent({ block }: BlockComponentProps) {
       .currentPage?.blocks.find((b) => b.id === block.id);
 
     sendJsonMessage({
-      type: "RUN_BLOCK",
+      // BEFORE: type: "RUN_BLOCK",
+      // AFTER: Use the correct NOUN.VERB format
+      type: "BLOCK.RUN",
+
       command_id: `run-block-${nanoid()}`,
       payload: {
         page_id: currentPage.id,
         block_id: block.id,
-        // Send the current content of the block from the store
-        block_content: currentBlockState?.content,
-        block_run: currentBlockState?.run,
+        // The server expects `content_override`, not `block_content`
+        content_override: currentBlockState?.content,
+        // The `block_run` key is not part of the new protocol for this message
+        // block_run: currentBlockState?.run, // REMOVE THIS
         parameters: pageParameters,
       },
     });

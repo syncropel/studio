@@ -1,201 +1,198 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/shared/store/useSessionStore.ts
 import { create } from "zustand";
-import { BlockResult, BlockResults, ContextualPage } from "../types/notebook";
-import { InboundMessage, InspectedArtifact } from "../api/types";
+import {
+  BlockResult,
+  ContextualPage,
+  PageInputParameter,
+} from "../types/notebook";
+import {
+  InboundMessage,
+  WorkspaceBrowseResultFields,
+  HomepageDataResultFields,
+  InspectedArtifact,
+} from "../api/types";
+import { ViewMode } from "./useSettingsStore";
 
-// --- TYPE DEFINITIONS for state objects ---
-
-export interface ActiveConnection {
-  alias: string;
-  source: string;
+// Type definitions remain the same
+export interface AssetTreeNode {
+  key: string;
+  title: string;
+  isLeaf: boolean;
+  type: "project" | "group" | "flow" | "query" | "application";
+  children?: AssetTreeNode[];
+  isLoadingChildren?: boolean;
 }
 
-export interface SessionVariable {
-  name: string;
-  type: string;
-  preview: string;
-}
+// Helper function for tree updates remains the same
+const updateTreeDataWithChildren = (
+  list: AssetTreeNode[],
+  key: React.Key,
+  children: AssetTreeNode[]
+): AssetTreeNode[] => {
+  return list.map((node) => {
+    if (node.key === key) {
+      return { ...node, children, isLoadingChildren: false };
+    }
+    if (node.children) {
+      return {
+        ...node,
+        children: updateTreeDataWithChildren(node.children, key, children),
+      };
+    }
+    return node;
+  });
+};
 
-export interface Flow {
-  Name: string;
-  Description: string;
-}
-
-export interface Query {
-  Name: string;
-}
-
+// Define PageParameters type for clarity
 export type PageParameters = Record<string, any>;
-export type ViewMode = "document" | "grid" | "graph";
 
 interface SessionStore {
-  // Core Session & Workspace Data
-  connections: ActiveConnection[];
-  variables: SessionVariable[];
-  flows: Flow[];
-  queries: Query[];
+  // --- STATE ---
+  connections: any[];
+  variables: any[];
   lastJsonMessage: InboundMessage | null;
 
-  // Current Page & Execution State
+  projectsTreeData: AssetTreeNode[];
+  libraryTreeData: AssetTreeNode[];
+  homepageData: HomepageDataResultFields | null;
+
+  isWorkspaceLoading: boolean;
+  isHomepageLoading: boolean;
+
   currentPage: ContextualPage | null;
-  pageParameters: PageParameters;
-  blockResults: BlockResults;
+  pageParameters: PageParameters; // <-- RE-INTRODUCED
+  blockResults: Record<string, BlockResult | undefined>;
   selectedBlockId: string | null;
 
-  // UI Visibility State (Desktop Panels)
-  isNavigatorVisible: boolean;
-  isInspectorVisible: boolean;
-  isTerminalVisible: boolean; // This will become the "Activity Hub"
-
-  // --- START: NEW MOBILE & SPOTLIGHT STATE ---
-  // UI Visibility State (Mobile Drawers)
-  isNavDrawerOpen: boolean;
-  isInspectorDrawerOpen: boolean;
-
-  // UI Visibility State (Global Spotlight Modal)
-  isSpotlightVisible: boolean;
-  // --- END: NEW MOBILE & SPOTLIGHT STATE ---
-
-  // Notebook View Options
-  viewMode: ViewMode;
-  showCodeBlocks: boolean;
-  showMarkdownBlocks: boolean;
-
   inspectedArtifacts: InspectedArtifact[];
-  addInspectedArtifact: (artifact: InspectedArtifact) => void;
-  removeInspectedArtifact: (id: string) => void;
 
-  // --- ACTIONS to modify the state ---
+  showCodeBlocks: boolean; // Add this
+  showMarkdownBlocks: boolean; // Add this
 
-  // Data Setters
-  setConnections: (connections: ActiveConnection[]) => void;
-  setVariables: (variables: SessionVariable[]) => void;
-  setFlows: (flows: Flow[]) => void;
-  setQueries: (queries: Query[]) => void;
+  // --- ACTIONS ---
   setLastJsonMessage: (message: InboundMessage | null) => void;
   setCurrentPage: (page: ContextualPage | null) => void;
   setBlockResult: (blockId: string, result: BlockResult) => void;
+  setConnections: (connections: any[]) => void;
+  setVariables: (variables: any[]) => void;
+
+  handleWorkspaceBrowseResult: (payload: WorkspaceBrowseResultFields) => void;
+  setHomepageData: (data: HomepageDataResultFields | null) => void;
+
+  setIsWorkspaceLoading: (isLoading: boolean) => void;
+  setIsHomepageLoading: (isLoading: boolean) => void;
+
   setSelectedBlockId: (blockId: string | null) => void;
-
-  // UI Toggles (Desktop)
-  toggleNavigator: (open?: boolean) => void;
-  toggleInspector: (open?: boolean) => void;
-  toggleTerminal: (open?: boolean) => void;
-  toggleNavDrawer: (open?: boolean) => void;
-  toggleInspectorDrawer: (open?: boolean) => void;
-
-  // UI Toggles (Spotlight)
-  openSpotlight: () => void;
-  closeSpotlight: () => void;
-  // --- END: NEW MOBILE & SPOTLIGHT ACTIONS ---
-
-  // Notebook View Actions
-  setViewMode: (mode: ViewMode) => void;
-  toggleShowCodeBlocks: () => void;
-  toggleShowMarkdownBlocks: () => void;
-  setShowOutputsOnly: (showOnly: boolean) => void;
-
-  // Content Updaters
   updateBlockContent: (blockId: string, newContent: string) => void;
-  updatePageParameter: (key: string, value: any) => void;
-  reset: () => void;
-}
+  updatePageParameter: (key: string, value: any) => void; // <-- RE-INTRODUCED
 
-// --- The `create` implementation of the store ---
+  addInspectedArtifact: (artifact: InspectedArtifact) => void;
+  removeInspectedArtifact: (id: string) => void;
+
+  reset: () => void;
+  toggleShowCodeBlocks: () => void; // Add this
+  toggleShowMarkdownBlocks: () => void; // Add this
+  setShowOutputsOnly: (showOnly: boolean) => void; // Add this
+}
 
 const initialState = {
   connections: [],
   variables: [],
-  flows: [],
-  queries: [],
   lastJsonMessage: null,
+  projectsTreeData: [],
+  libraryTreeData: [],
+  homepageData: null,
+  isWorkspaceLoading: true,
+  isHomepageLoading: true,
   currentPage: null,
-  pageParameters: {},
+  pageParameters: {}, // <-- RE-INTRODUCED
   blockResults: {},
   selectedBlockId: null,
-  isNavigatorVisible: true,
-  isInspectorVisible: false,
-  isTerminalVisible: false,
-  isNavDrawerOpen: false,
-  isInspectorDrawerOpen: false,
-  isSpotlightVisible: false,
-  viewMode: "document" as ViewMode,
+  inspectedArtifacts: [],
   showCodeBlocks: true,
   showMarkdownBlocks: true,
-  inspectedArtifacts: [],
 };
 
 export const useSessionStore = create<SessionStore>((set) => ({
   ...initialState,
-  // Default initial state values
 
   // --- ACTION IMPLEMENTATIONS ---
-  setConnections: (connections) => set({ connections }),
-  setVariables: (variables) => set({ variables }),
-  setFlows: (flows) => set({ flows }),
-  setQueries: (queries) => set({ queries }),
   setLastJsonMessage: (message) => set({ lastJsonMessage: message }),
+
+  // --- CRITICAL FIX in setCurrentPage ---
   setCurrentPage: (page) => {
     const initialParams: PageParameters = {};
     if (page?.inputs) {
+      // Pre-populate parameters with default values from the new page
       for (const key in page.inputs) {
-        initialParams[key] = page.inputs[key].default;
+        if (page.inputs[key].default !== undefined) {
+          initialParams[key] = page.inputs[key].default;
+        }
       }
     }
-    set({ currentPage: page, blockResults: {}, pageParameters: initialParams });
+    // When a new page is loaded, we must also reset its parameters and results
+    set({
+      currentPage: page,
+      blockResults: {},
+      selectedBlockId: null,
+      pageParameters: initialParams,
+    });
   },
+
   setBlockResult: (blockId, result) =>
     set((state) => ({
       blockResults: { ...state.blockResults, [blockId]: result },
     })),
-  setSelectedBlockId: (blockId) => set({ selectedBlockId: blockId }),
+  setConnections: (connections) => set({ connections }),
+  setVariables: (variables) => set({ variables }),
+  setIsWorkspaceLoading: (isLoading) => set({ isWorkspaceLoading: isLoading }),
+  setIsHomepageLoading: (isLoading) => set({ isHomepageLoading: isLoading }),
+  setHomepageData: (data) =>
+    set({ homepageData: data, isHomepageLoading: false }),
 
-  toggleNavigator: (open) =>
-    set((state) => ({
-      isNavigatorVisible: open === undefined ? !state.isNavigatorVisible : open,
-    })),
-  toggleInspector: (open) =>
-    set((state) => ({
-      isInspectorVisible: open === undefined ? !state.isInspectorVisible : open,
-    })),
-  toggleTerminal: (open) =>
-    set((state) => ({
-      isTerminalVisible: open === undefined ? !state.isTerminalVisible : open,
-    })),
-
-  toggleNavDrawer: (open) =>
-    set((state) => ({
-      isNavDrawerOpen: open === undefined ? !state.isNavDrawerOpen : open,
-    })),
-  toggleInspectorDrawer: (open) =>
-    set((state) => ({
-      isInspectorDrawerOpen:
-        open === undefined ? !state.isInspectorDrawerOpen : open,
-    })),
-
-  openSpotlight: () => set({ isSpotlightVisible: true }),
-  closeSpotlight: () => set({ isSpotlightVisible: false }),
-
-  setViewMode: (mode) => set({ viewMode: mode }),
-  toggleShowCodeBlocks: () =>
-    set((state) => ({ showCodeBlocks: !state.showCodeBlocks })),
-  toggleShowMarkdownBlocks: () =>
-    set((state) => ({ showMarkdownBlocks: !state.showMarkdownBlocks })),
-  setShowOutputsOnly: (showOnly) =>
-    set({
-      showCodeBlocks: !showOnly,
-      showMarkdownBlocks: !showOnly,
+  handleWorkspaceBrowseResult: (payload) =>
+    set((state) => {
+      const { path, data } = payload;
+      if (path === "/") {
+        return {
+          projectsTreeData: data.projects || [],
+          libraryTreeData: data.library || [],
+          isWorkspaceLoading: false,
+        };
+      } else {
+        const nodesForTree: AssetTreeNode[] = Array.isArray(data)
+          ? (data as any[])
+          : [];
+        if (path.startsWith("library/")) {
+          return {
+            libraryTreeData: updateTreeDataWithChildren(
+              state.libraryTreeData,
+              path,
+              nodesForTree
+            ),
+          };
+        } else {
+          return {
+            projectsTreeData: updateTreeDataWithChildren(
+              state.projectsTreeData,
+              path,
+              nodesForTree
+            ),
+          };
+        }
+      }
     }),
 
+  setSelectedBlockId: (blockId) => set({ selectedBlockId: blockId }),
   updateBlockContent: (blockId, newContent) =>
     set((state) => {
       if (!state.currentPage) return {};
       const newBlocks = state.currentPage.blocks.map((block) =>
         block.id === blockId ? { ...block, content: newContent } : block
       );
-      return {
-        currentPage: { ...state.currentPage, blocks: newBlocks },
-      };
+      return { currentPage: { ...state.currentPage, blocks: newBlocks } };
     }),
+  // --- RE-INTRODUCED ACTION ---
   updatePageParameter: (key, value) =>
     set((state) => ({
       pageParameters: { ...state.pageParameters, [key]: value },
@@ -203,7 +200,6 @@ export const useSessionStore = create<SessionStore>((set) => ({
 
   addInspectedArtifact: (artifact) =>
     set((state) => ({
-      // Add the new artifact, preventing duplicates
       inspectedArtifacts: [
         ...state.inspectedArtifacts.filter((a) => a.id !== artifact.id),
         artifact,
@@ -213,5 +209,15 @@ export const useSessionStore = create<SessionStore>((set) => ({
     set((state) => ({
       inspectedArtifacts: state.inspectedArtifacts.filter((a) => a.id !== id),
     })),
+
   reset: () => set(initialState),
+  toggleShowCodeBlocks: () =>
+    set((state) => ({ showCodeBlocks: !state.showCodeBlocks })),
+  toggleShowMarkdownBlocks: () =>
+    set((state) => ({ showMarkdownBlocks: !state.showMarkdownBlocks })),
+  setShowOutputsOnly: (showOnly) =>
+    set({
+      showCodeBlocks: !showOnly,
+      showMarkdownBlocks: !showOnly,
+    }),
 }));

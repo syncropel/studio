@@ -30,25 +30,16 @@ import {
   IconBuildingStore,
   IconKey,
 } from "@tabler/icons-react";
-import { useSessionStore } from "@/shared/store/useSessionStore";
+import { useSessionStore, AssetTreeNode } from "@/shared/store/useSessionStore";
+import { useUIStateStore } from "@/shared/store/useUIStateStore";
 import { useWebSocket } from "@/shared/providers/WebSocketProvider";
 import { nanoid } from "nanoid";
 import { useRouter } from "next/navigation";
+import { ReadyState } from "react-use-websocket";
 
 import CollapsibleSection from "./CollapsibleSection";
 import NavigationItem from "./NavigationItem";
 import ConnectionStatus from "./ConnectionStatus";
-import { ReadyState } from "react-use-websocket";
-import { InboundMessage } from "@/shared/api/types";
-
-interface AssetTreeNode {
-  key: string;
-  title: string;
-  isLeaf: boolean;
-  type: "project" | "group" | "flow" | "query" | "application";
-  children?: AssetTreeNode[];
-  isLoadingChildren?: boolean;
-}
 
 interface SidebarWidgetProps {
   onConnectionClick: () => void;
@@ -59,67 +50,43 @@ export default function SidebarWidget({
   onConnectionClick,
   disabled = false,
 }: SidebarWidgetProps) {
+  // --- STATE MANAGEMENT ---
+  // Read shared, global state directly from our sliced Zustand stores.
   const {
     connections,
     variables,
     setCurrentPage,
-    lastJsonMessage,
     currentPage,
+    projectsTreeData,
+    libraryTreeData,
+    isWorkspaceLoading,
+    setIsWorkspaceLoading, // We also need the setter
   } = useSessionStore();
+
   const { sendJsonMessage, readyState } = useWebSocket();
   const router = useRouter();
 
-  const [projectsTreeData, setProjectsTreeData] = useState<AssetTreeNode[]>([]);
-  const [libraryTreeData, setLibraryTreeData] = useState<AssetTreeNode[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // Manage UI-specific state (like expanded nodes) locally within the component.
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
 
   const selectedKeys = currentPage?.id ? [currentPage.id] : [];
 
-  const goToHome = () => {
-    setCurrentPage(null);
-    router.push("/");
-  };
-  const updateTreeDataWithChildren = useCallback(
-    (
-      list: AssetTreeNode[],
-      key: React.Key,
-      children: AssetTreeNode[]
-    ): AssetTreeNode[] => {
-      return list.map((node) => {
-        if (node.key === key) {
-          return { ...node, children, isLoadingChildren: false };
-        }
-        if (node.children) {
-          return {
-            ...node,
-            children: updateTreeDataWithChildren(node.children, key, children),
-          };
-        }
-        return node;
-      });
-    },
-    []
-  );
-
-  // Effect to trigger the initial fetch of top-level projects
+  // --- DATA FETCHING ---
+  // This simplified effect's only job is to trigger the initial data fetch
+  // when the component mounts and the WebSocket is ready.
   useEffect(() => {
-    // --- START: DEFINITIVE GUARD CLAUSE ---
-    // Only attempt to fetch workspace data if the connection is open.
-    if (readyState === ReadyState.OPEN && isLoading) {
+    if (readyState === ReadyState.OPEN && isWorkspaceLoading) {
       sendJsonMessage({
-        type: "BROWSE_WORKSPACE",
+        type: "WORKSPACE.BROWSE",
         command_id: `browse-root-${nanoid()}`,
         payload: { path: "/" },
       });
-    } else if (readyState !== ReadyState.CONNECTING) {
-      // If we are not connecting and not open, we are disconnected, so stop loading.
-      setIsLoading(false);
     }
-    // --- END: DEFINITIVE GUARD CLAUSE ---
-  }, [readyState, sendJsonMessage, isLoading]);
+  }, [readyState, isWorkspaceLoading, sendJsonMessage]);
 
-  // Effect to synchronize tree expansion with the active page
+  // --- UI LOGIC & HANDLERS ---
+
+  // Effect to automatically expand parent folders when a new page is loaded from anywhere.
   useEffect(() => {
     if (currentPage?.id) {
       const getParentKeys = (key: Key): Key[] => {
@@ -139,60 +106,24 @@ export default function SidebarWidget({
     }
   }, [currentPage]);
 
-  // Effect to handle incoming WebSocket messages
-  useEffect(() => {
-    const message = lastJsonMessage as InboundMessage;
-    if (message?.type === "WORKSPACE_BROWSE_RESULT") {
-      const { path, data } = message.payload as any;
+  const goToHome = () => {
+    setCurrentPage(null);
+    router.push("/");
+  };
 
-      if (path === "/") {
-        setProjectsTreeData(data.projects || []);
-        setLibraryTreeData(data.library || []);
-      } else {
-        const nodesForTree = data || [];
-        if (path.startsWith("library/")) {
-          setLibraryTreeData((origin) =>
-            updateTreeDataWithChildren(origin, path, nodesForTree)
-          );
-        } else {
-          setProjectsTreeData((origin) =>
-            updateTreeDataWithChildren(origin, path, nodesForTree)
-          );
-        }
-      }
-      setIsLoading(false);
-    } else if (message?.type === "PAGE_LOADED") {
-      setCurrentPage(message.payload as any);
-    }
-  }, [lastJsonMessage, setCurrentPage, updateTreeDataWithChildren]);
-
+  // Callback for lazy-loading child nodes when a user expands a folder.
   const onLoadData = useCallback(
     (treeNode: EventDataNode<AssetTreeNode>): Promise<void> => {
       return new Promise((resolve) => {
-        if (treeNode.children) {
+        // Don't re-fetch if children already exist.
+        if (treeNode.children && treeNode.children.length > 0) {
           resolve();
           return;
         }
-        const treeToUpdate = treeNode.key.toString().startsWith("library/")
-          ? setLibraryTreeData
-          : setProjectsTreeData;
-        treeToUpdate((origin) => {
-          const updateLoadingState = (
-            nodes: AssetTreeNode[]
-          ): AssetTreeNode[] =>
-            nodes.map((node) => {
-              if (node.key === treeNode.key)
-                return { ...node, isLoadingChildren: true };
-              if (node.children)
-                return { ...node, children: updateLoadingState(node.children) };
-              return node;
-            });
-          return updateLoadingState(origin);
-        });
         sendJsonMessage({
-          type: "BROWSE_WORKSPACE",
+          type: "WORKSPACE.BROWSE",
           command_id: `browse-${treeNode.key}-${nanoid()}`,
-          payload: { path: treeNode.key },
+          payload: { path: treeNode.key as string },
         });
         resolve();
       });
@@ -200,19 +131,22 @@ export default function SidebarWidget({
     [sendJsonMessage]
   );
 
+  // Callback for when a user clicks on any item in the tree.
   const onSelect = useCallback(
     (
       selectedKeys: React.Key[],
       info: { node: EventDataNode<AssetTreeNode> }
     ) => {
       if (info.node.isLeaf) {
-        const pageName = info.node.key as string;
+        // If it's a file, send a command to load the page.
+        const pageId = info.node.key as string;
         sendJsonMessage({
-          type: "LOAD_PAGE",
+          type: "PAGE.LOAD",
           command_id: `load-page-${nanoid()}`,
-          payload: { page_name: pageName },
+          payload: { page_id: pageId },
         });
       } else {
+        // If it's a folder, toggle its expanded state.
         setExpandedKeys((keys) => {
           const key = info.node.key;
           return keys.includes(key)
@@ -221,14 +155,16 @@ export default function SidebarWidget({
         });
       }
     },
-    [sendJsonMessage, setExpandedKeys]
+    [sendJsonMessage]
   );
 
+  // --- RENDER HELPERS ---
+
   const switcherIcon = (props: TreeNodeProps) => {
-    if (props.isLeaf) return null;
+    if (props.isLeaf) return null; // Leaf nodes (files) don't have a switcher.
     const nodeData = props.data as AssetTreeNode;
     if (nodeData.isLoadingChildren)
-      return <Loader size={12} className="mr-1" />;
+      return <Loader size={12} className="mr-1" />; // Show loader during lazy-load
     return props.expanded ? (
       <IconChevronDown size={14} className="text-gray-400" />
     ) : (
@@ -263,7 +199,10 @@ export default function SidebarWidget({
   };
 
   const renderTree = (data: AssetTreeNode[], placeholder: string) => {
-    if (isLoading && data.length === 0) return <Loader size="xs" m="md" />;
+    // This now correctly uses the loading state from the central store.
+    if (isWorkspaceLoading && data.length === 0) {
+      return <Loader size="xs" m="md" />;
+    }
     if (data.length > 0) {
       return (
         <Tree<AssetTreeNode>
@@ -277,6 +216,7 @@ export default function SidebarWidget({
           itemHeight={28}
           expandedKeys={expandedKeys}
           onExpand={(keys) => setExpandedKeys(keys)}
+          selectedKeys={selectedKeys}
         />
       );
     }
@@ -287,6 +227,7 @@ export default function SidebarWidget({
     );
   };
 
+  // --- MAIN RENDER ---
   return (
     <aside
       className={`h-full w-full flex flex-col bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800 transition-opacity`}
@@ -305,6 +246,7 @@ export default function SidebarWidget({
           </ActionIcon>
         </Tooltip>
       </Group>
+
       <ScrollArea
         className={`flex-grow p-2 transition-opacity ${
           disabled ? "opacity-50 pointer-events-none" : ""
@@ -324,6 +266,8 @@ export default function SidebarWidget({
                 line-height: 1.5;
               }
               .minimalist-tree .rc-tree-treenode {
+                display: flex; /* Use flexbox for alignment */
+                align-items: center;
                 padding: 0;
                 margin: 0;
               }
@@ -339,6 +283,7 @@ export default function SidebarWidget({
                 color: inherit;
                 min-height: 28px;
                 width: 100%;
+                flex-grow: 1; /* Allow content to fill remaining space */
               }
               .minimalist-tree .rc-tree-node-content-wrapper:hover {
                 background-color: rgba(0, 0, 0, 0.03);
@@ -357,19 +302,30 @@ export default function SidebarWidget({
                 .rc-tree-node-content-wrapper.rc-tree-node-selected {
                 background-color: rgba(59, 130, 246, 0.12) !important;
               }
-              .minimalist-tree .rc-tree-indent-unit {
-                width: 20px;
+
+              /* --- START: INDENTATION FIXES --- */
+              .minimalist-tree .rc-tree-indent {
                 display: inline-block;
+                flex-shrink: 0; /* Prevent indent from shrinking */
+              }
+              .minimalist-tree .rc-tree-indent-unit {
+                display: inline-block;
+                width: 20px; /* Explicitly set the width for each indent level */
               }
               .minimalist-tree .rc-tree-switcher {
+                width: 20px; /* Give the switcher a fixed width to align items */
+                height: 28px; /* Match the item height for vertical alignment */
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                width: 16px;
-                height: 16px;
-                margin-right: 4px;
                 flex-shrink: 0;
+                cursor: pointer;
               }
+              .minimalist-tree .rc-tree-switcher-noop {
+                width: 20px; /* Ensure leaf nodes also occupy the same space */
+              }
+              /* --- END: INDENTATION FIXES --- */
+
               .minimalist-tree .rc-tree-iconEle {
                 display: inline-flex;
                 align-items: center;
@@ -388,7 +344,6 @@ export default function SidebarWidget({
               }
             `}</style>
 
-            {/* --- PILLAR 1: PROJECTS --- */}
             <CollapsibleSection
               title="Projects"
               icon={IconFolder}
@@ -399,7 +354,6 @@ export default function SidebarWidget({
               </Box>
             </CollapsibleSection>
 
-            {/* --- PILLAR 2: LIBRARY --- */}
             <CollapsibleSection
               title="Library"
               icon={IconFolders}
@@ -410,7 +364,6 @@ export default function SidebarWidget({
               </Box>
             </CollapsibleSection>
 
-            {/* --- PILLAR 3: SESSION --- */}
             <CollapsibleSection
               title="Session"
               icon={IconSettings}
@@ -450,7 +403,7 @@ export default function SidebarWidget({
           </div>
         )}
       </ScrollArea>
-      {/* --- PILLAR 4: SETTINGS HUB & STATUS --- */}
+
       <Box className="border-t border-gray-200 dark:border-gray-800 p-2">
         <CollapsibleSection
           title="Settings"
