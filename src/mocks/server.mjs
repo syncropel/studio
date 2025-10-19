@@ -40,6 +40,7 @@ import {
   MOCK_RUN_DETAILS,
   MOCK_COMMAND_RESPONSES,
   MOCK_BLOCK_ERRORS,
+  MOCK_RAW_PAGE_CONTENT,
 } from "./mock-data.js";
 
 // --- Server Configuration ---
@@ -122,27 +123,37 @@ wss.on("connection", (ws) => {
           );
           break;
         }
-
         case "PAGE.LOAD": {
-          const pageId = payload.page_id; // Correctly using page_id from client
-          const pageData = MOCK_PAGES[pageId];
-          if (pageData) {
+          const pageId = payload.page_id;
+          const pageModel = MOCK_PAGES[pageId];
+          const pageContent = MOCK_RAW_PAGE_CONTENT[pageId]; // <-- Get the raw content
+
+          if (pageModel && pageContent) {
+            // Adhere to the protocol spec: { uri, content, initial_model }
+            const fields = {
+              uri: `vfs:///${pageId}`, // Use a virtual file system URI
+              content: pageContent, // The raw text for Monaco
+              initial_model: pageModel, // The parsed structure for metadata
+            };
+
             sendEvent(
               command_id,
               "PAGE.LOADED",
               `/pages/${pageId}`,
               "info",
               `Page '${pageId}' loaded.`,
-              pageData
+              fields // <--- SEND THE NEW 'fields' OBJECT
             );
           } else {
-            // Simulate a server-side error if the page isn't in our mock data
+            const errorMessage = !pageModel
+              ? `Page model '${pageId}' not found in mock data.`
+              : `Raw content for page '${pageId}' not found in mock data.`;
             sendEvent(
               command_id,
               "SYSTEM.ERROR",
               `/pages/${pageId}`,
               "error",
-              `Page '${pageId}' not found in mock data.`
+              errorMessage
             );
           }
           break;

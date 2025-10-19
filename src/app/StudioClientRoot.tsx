@@ -83,7 +83,7 @@ export default function StudioClientRoot() {
       !initialLoadHandled.current
     ) {
       const pageIdFromUrl = searchParams.get("page");
-      if (pageIdFromUrl) {
+      if (pageIdFromUrl && pageIdFromUrl !== "undefined") {
         sendJsonMessage({
           type: "PAGE.LOAD",
           command_id: `load-page-from-url-${nanoid()}`,
@@ -97,17 +97,25 @@ export default function StudioClientRoot() {
   // Effect for keeping the browser URL in sync with the current page state
   useEffect(() => {
     if (!isClient) return;
+
     const pageInUrl = searchParams.get("page");
-    if (currentPage && currentPage.id !== pageInUrl) {
-      router.push(`/?page=${currentPage.id}`, { scroll: false });
-    } else if (!currentPage && pageInUrl) {
+    const pageIdInState = currentPage?.id;
+
+    // Condition 1: We have a page in our state, and the URL is out of sync.
+    // This includes the case where the URL has `page=undefined` or is just `/`.
+    if (pageIdInState && pageIdInState !== pageInUrl) {
+      router.push(`/?page=${pageIdInState}`, { scroll: false });
+    }
+    // Condition 2: We have no page in our state, but the URL still thinks we do.
+    // This handles the case where the user navigates "home".
+    else if (!pageIdInState && pageInUrl) {
       router.push(`/`, { scroll: false });
     }
-  }, [currentPage, searchParams, router, isClient]);
+  }, [currentPage, searchParams, router, isClient]); // Dependencies are correct
 
   // --- EVENT HANDLERS ---
   const handleSpotlightItemClick = (item: HomepageItem) => {
-    closeSpotlight();
+    closeSpotlight(); // Close the modal immediately
     if (item.action.type === "open_page") {
       sendJsonMessage({
         type: "PAGE.LOAD",

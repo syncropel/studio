@@ -127,12 +127,23 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               break;
 
             case "PAGE.LOADED":
+              console.log("[DEBUG] Received PAGE.LOADED. Fields:", fields);
               if (fields) {
-                // Simplified: The fields object is the page.
-                setCurrentPage(fields as ContextualPage);
+                // --- DEFINITIVE FIX ---
+                // The `fields` object now contains `initial_model` which is our ContextualPage
+                const pageModel = fields.initial_model as
+                  | ContextualPage
+                  | undefined;
+                if (pageModel) {
+                  setCurrentPage(pageModel);
+                } else {
+                  console.error(
+                    "Received PAGE.LOADED but initial_model was missing in fields:",
+                    fields
+                  );
+                }
               }
               break;
-
             case "SESSION.LOADED":
               if (fields) {
                 // --- THIS IS THE FIX ---

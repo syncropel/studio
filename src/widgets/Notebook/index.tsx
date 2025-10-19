@@ -7,9 +7,12 @@ import { useSessionStore } from "@/shared/store/useSessionStore";
 import DocumentView from "./views/DocumentView";
 import GridView from "./views/GridView";
 import GraphView from "./views/GraphView";
+import { useSettingsStore } from "@/shared/store/useSettingsStore";
 
 export default function Notebook() {
-  const { currentPage, viewMode } = useSessionStore();
+  const { currentPage } = useSessionStore();
+
+  const { viewMode } = useSettingsStore();
 
   const renderView = () => {
     switch (viewMode) {
@@ -26,29 +29,19 @@ export default function Notebook() {
   return (
     <Box className="h-full flex flex-col bg-white dark:bg-black">
       <ScrollArea className="flex-grow">
-        <Box p="xl">
-          {currentPage ? (
-            <>
-              <Box mb="xl">
-                <Text size="xl" fw={700}>
-                  {currentPage.name}
-                </Text>
-                {currentPage.description && (
-                  <Text c="dimmed">{currentPage.description}</Text>
-                )}
-              </Box>
-
-              {renderView()}
-            </>
-          ) : (
-            <Center h="100%">
-              <Text c="dimmed">
-                No page selected. Please choose a notebook from the Workspace
-                navigator.
-              </Text>
-            </Center>
-          )}
-        </Box>
+        {currentPage ? (
+          <>
+            {/* Render the view without extra padding */}
+            {renderView()}
+          </>
+        ) : (
+          <Center h="100%">
+            <Text c="dimmed">
+              No page selected. Please choose a notebook from the Workspace
+              navigator.
+            </Text>
+          </Center>
+        )}
       </ScrollArea>
     </Box>
   );

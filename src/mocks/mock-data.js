@@ -1228,3 +1228,84 @@ LINE 1: SELECT * FROM a_table_that_does_not_exist;`,
     },
   },
 };
+
+// ========================================================================
+//   SECTION 9: RAW PAGE CONTENT (FOR AUGMENTED TEXT EDITOR)
+// ========================================================================
+// This simulates the raw text content of the .cx.md files, which is now
+// required by the single-instance Monaco editor architecture.
+
+export const MOCK_RAW_PAGE_CONTENT = {
+  // ----------------------------------------------------------------------
+  //   Raw content for `finance-project/monthly-billing`
+  // ----------------------------------------------------------------------
+  "finance-project/monthly-billing": `---
+name: Monthly Billing Report
+description: A complex workflow that generates the monthly billing report for finance.
+inputs:
+  start_date:
+    description: Start of the billing period.
+    default: "2025-09-01"
+  end_date:
+    description: End of the billing period.
+    default: "2025-10-01"
+---
+
+This notebook generates the monthly billing report.
+
+First, we fetch all raw transactions from the production database within the specified date range.
+
+\`\`\`yaml
+cx_block: true
+id: billing_report_get_transactions
+engine: sql
+name: Fetch Raw Transactions
+connection_source: user:prod-db
+inputs:
+  - inputs.start_date
+  - inputs.end_date
+outputs:
+  - raw_transactions
+\`\`\`
+\`\`\`sql
+SELECT * FROM transactions WHERE created_at BETWEEN '{{ inputs.start_date }}' AND '{{ inputs.end_date }}';
+\`\`\`
+
+Next, we use a declarative transform to clean up the data and calculate the profit for each transaction.
+
+\`\`\`yaml
+cx_block: true
+id: billing_report_transform_data
+engine: transform
+name: Clean and Aggregate Data
+inputs:
+  - billing_report_get_transactions.raw_transactions
+outputs:
+  - summary_data
+\`\`\`
+\`\`\`yaml
+- name: "Calculate Profit"
+  engine: "pandas"
+  operation:
+    type: "add_column"
+    column_name: "profit"
+    expression: "revenue - cost"
+\`\`\`
+
+Finally, we save the resulting data frame as an Excel file for the finance team. The file will be available as a downloadable artifact.
+
+\`\`\`yaml
+cx_block: true
+id: billing_report_save_excel
+engine: artifact
+name: Save Full Report as Excel
+inputs:
+  - billing_report_transform_data.summary_data
+\`\`\`
+\`\`\`yaml
+format: excel
+target_path: "./outputs/billing-report-{{ inputs.end_date }}.xlsx"
+\`\`\`
+`,
+  // We can add raw content for other pages here as needed...
+};

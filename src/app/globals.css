@@ -56,3 +56,185 @@ body {
 .dark .rc-tree-node-selected {
   background-color: #3b82f6 !important; /* blue-500 */
 }
+
+/* --- STYLES FOR MONACO GUTTER ICONS --- */
+.gutter-icon {
+  width: 16px;
+  height: 16px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  cursor: pointer;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+}
+
+.glyph-run {
+  background-color: #9ca3af; /* gray-400 */
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' class='icon icon-tabler icon-tabler-player-play' width='24' height='24' viewBox='0 0 24 24' stroke-width='2' stroke='currentColor' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath stroke='none' d='M0 0h24v24H0z' fill='none'/%3E%3Cpath d='M7 4v16l13 -8z' /%3E%3C/svg%3E");
+}
+.glyph-run:hover {
+  background-color: #3b82f6; /* blue-500 */
+}
+
+.glyph-running {
+  background-color: #3b82f6; /* blue-500 */
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' class='icon icon-tabler icon-tabler-loader-2' width='24' height='24' viewBox='0 0 24 24' stroke-width='2' stroke='currentColor' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath stroke='none' d='M0 0h24v24H0z' fill='none'/%3E%3Cpath d='M12 3a9 9 0 1 0 9 9' /%3E%3C/svg%3E");
+  animation: spin 1s linear infinite;
+}
+
+.glyph-success {
+  background-color: #22c55e; /* green-500 */
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' class='icon icon-tabler icon-tabler-circle-check' width='24' height='24' viewBox='0 0 24 24' stroke-width='2' stroke='currentColor' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath stroke='none' d='M0 0h24v24H0z' fill='none'/%3E%3Cpath d='M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0' /%3E%3Cpath d='M9 12l2 2l4 -4' /%3E%3C/svg%3E");
+}
+
+.glyph-error {
+  background-color: #ef4444; /* red-500 */
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' class='icon icon-tabler icon-tabler-alert-circle' width='24' height='24' viewBox='0 0 24 24' stroke-width='2' stroke='currentColor' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath stroke='none' d='M0 0h24v24H0z' fill='none'/%3E%3Cpath d='M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0' /%3E%3Cpath d='M12 8v4' /%3E%3Cpath d='M12 16h.01' /%3E%3C/svg%3E");
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* --- NEW: Style for the Page-Level Run Button --- */
+.glyph-run-all {
+  background-color: #9ca3af;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' stroke-width='2' stroke='currentColor' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath stroke='none' d='M0 0h24v24H0z' fill='none'/%3E%3Cpath d='M6 4v16' /%3E%3Cpath d='M8 6v12l10 -6z' /%3E%3C/svg%3E");
+}
+.glyph-run-all:hover {
+  background-color: #3b82f6;
+}
+
+/* --- STYLES FOR CONTENT WIDGETS --- */
+.output-view-zone {
+  /* Layout and positioning - CRITICAL for interactivity */
+  position: relative;
+  z-index: 10;
+  pointer-events: auto !important;
+  user-select: text !important;
+
+  /* Visual styling */
+  padding: 1rem;
+  background-color: #f9fafb; /* gray-50 */
+  border: 1px solid #e5e7eb; /* gray-200 */
+  border-radius: 8px;
+  margin: 8px 0;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+.dark .output-view-zone {
+  background-color: #111827; /* gray-900 */
+  border-color: #374151; /* gray-700 */
+}
+
+/* Make the content inside a fixed-height zone scrollable if it overflows */
+.output-view-zone.with-scrolling {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* --- INTERACTIVITY FIXES FOR ALL INTERACTIVE ELEMENTS --- */
+
+/* Ensure all form elements are fully interactive */
+.output-view-zone input,
+.output-view-zone button,
+.output-view-zone select,
+.output-view-zone textarea,
+.output-view-zone a,
+.output-view-zone label {
+  pointer-events: auto !important;
+  cursor: pointer;
+}
+
+/* Text input specific cursor */
+.output-view-zone input[type="text"],
+.output-view-zone input[type="email"],
+.output-view-zone input[type="password"],
+.output-view-zone input[type="number"],
+.output-view-zone input[type="date"],
+.output-view-zone input[type="datetime-local"],
+.output-view-zone input[type="search"],
+.output-view-zone input[type="tel"],
+.output-view-zone input[type="url"],
+.output-view-zone textarea {
+  cursor: text;
+  user-select: text;
+}
+
+/* Ensure checkboxes and radios are clickable */
+.output-view-zone input[type="checkbox"],
+.output-view-zone input[type="radio"] {
+  cursor: pointer;
+}
+
+/* Ensure all children can be selected and interacted with */
+.output-view-zone * {
+  pointer-events: auto;
+}
+
+/* Allow text selection in readable content */
+.output-view-zone p,
+.output-view-zone span,
+.output-view-zone div,
+.output-view-zone pre,
+.output-view-zone code {
+  user-select: text;
+}
+
+/* Ensure form containers don't block events */
+.output-view-zone form,
+.output-view-zone fieldset,
+.output-view-zone .form-group {
+  pointer-events: auto;
+}
+
+/* Ensure dropdowns and selects work properly */
+.output-view-zone select {
+  cursor: pointer;
+  pointer-events: auto !important;
+}
+
+.output-view-zone select:focus,
+.output-view-zone input:focus,
+.output-view-zone textarea:focus {
+  outline: 2px solid #3b82f6; /* blue-500 */
+  outline-offset: 2px;
+}
+
+/* Ensure buttons are fully interactive with proper visual feedback */
+.output-view-zone button {
+  pointer-events: auto !important;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.output-view-zone button:hover {
+  opacity: 0.9;
+}
+
+.output-view-zone button:active {
+  transform: scale(0.98);
+}
+
+.output-view-zone button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Ensure links are clickable */
+.output-view-zone a {
+  pointer-events: auto !important;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.output-view-zone a:hover {
+  opacity: 0.8;
+}
