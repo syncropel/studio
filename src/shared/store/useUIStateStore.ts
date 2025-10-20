@@ -1,8 +1,13 @@
 // /home/dpwanjala/repositories/syncropel/studio/src/shared/store/useUIStateStore.ts
 import { create } from "zustand";
+import React from "react";
 
-// Define the possible folding commands we can issue.
 export type FoldingCommand = "collapseAll" | "expandAll" | "collapseCode";
+
+interface ModalState {
+  title: string;
+  content: React.ReactNode;
+}
 
 interface UIStateStore {
   // --- STATE ---
@@ -10,9 +15,12 @@ interface UIStateStore {
   isConnectionManagerOpen: boolean;
   isNavDrawerOpen: boolean;
   isInspectorDrawerOpen: boolean;
-
-  // New state to act as a command bus for folding actions.
   foldingCommand: FoldingCommand | null;
+  modalState: ModalState | null;
+
+  // NEW: State to track which inline forms are visible.
+  activeFormWidgetIds: Set<string>;
+  showCommandPalette: boolean;
 
   // --- ACTIONS ---
   openSpotlight: () => void;
@@ -20,9 +28,17 @@ interface UIStateStore {
   toggleConnectionManager: (open?: boolean) => void;
   toggleNavDrawer: (open?: boolean) => void;
   toggleInspectorDrawer: (open?: boolean) => void;
-
-  // New action to dispatch a folding command.
   setFoldingCommand: (command: FoldingCommand | null) => void;
+  openModal: (state: ModalState) => void;
+  closeModal: () => void;
+
+  // NEW: Action to toggle the visibility of a specific form.
+  toggleFormWidget: (widgetId: string) => void;
+  // NEW: Action to close all forms (useful on page change).
+  closeAllFormWidgets: () => void;
+  triggerCommandPalette: () => void;
+  // NEW: Action to reset the trigger
+  resetCommandPalette: () => void;
 }
 
 export const useUIStateStore = create<UIStateStore>((set) => ({
@@ -32,6 +48,10 @@ export const useUIStateStore = create<UIStateStore>((set) => ({
   isNavDrawerOpen: false,
   isInspectorDrawerOpen: false,
   foldingCommand: null,
+  modalState: null,
+  showCommandPalette: false,
+
+  activeFormWidgetIds: new Set(),
 
   // Actions
   openSpotlight: () => set({ isSpotlightVisible: true }),
@@ -50,7 +70,23 @@ export const useUIStateStore = create<UIStateStore>((set) => ({
       isInspectorDrawerOpen:
         open === undefined ? !state.isInspectorDrawerOpen : open,
     })),
-
-  // New action implementation
   setFoldingCommand: (command) => set({ foldingCommand: command }),
+  openModal: (state) => set({ modalState: state }),
+  closeModal: () => set({ modalState: null }),
+
+  // --- NEW ACTION IMPLEMENTATIONS ---
+  toggleFormWidget: (widgetId) =>
+    set((state) => {
+      const newSet = new Set(state.activeFormWidgetIds);
+      if (newSet.has(widgetId)) {
+        newSet.delete(widgetId);
+      } else {
+        newSet.add(widgetId);
+      }
+      return { activeFormWidgetIds: newSet };
+    }),
+
+  closeAllFormWidgets: () => set({ activeFormWidgetIds: new Set() }),
+  triggerCommandPalette: () => set({ showCommandPalette: true }),
+  resetCommandPalette: () => set({ showCommandPalette: false }),
 }));

@@ -1,16 +1,18 @@
 // /home/dpwanjala/repositories/syncropel/studio/src/widgets/TopBar/index.tsx
 "use client";
 
+import React, { useState, useEffect } from "react";
 import {
   Menu,
   Button,
   Group,
   Box,
   Text,
-  UnstyledButton,
   ActionIcon,
   Tooltip,
   Kbd,
+  TextInput,
+  UnstyledButton,
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { useSessionStore } from "@/shared/store/useSessionStore";
@@ -25,8 +27,15 @@ import {
 } from "@tabler/icons-react";
 
 export default function TopBar() {
-  const { currentPage, setCurrentPage, clearAllBlockResults } =
-    useSessionStore();
+  // --- STATE MANAGEMENT ---
+  // Sourcing state and actions from our three distinct, sliced stores.
+  const {
+    currentPage,
+    setCurrentPage,
+    clearAllBlockResults,
+    updatePageMetadata,
+    isDirty,
+  } = useSessionStore();
   const {
     isNavigatorVisible,
     toggleNavigator,
@@ -43,24 +52,47 @@ export default function TopBar() {
     showCode,
     setShowCode,
   } = useSettingsStore();
-  // Get the new action from the UI store
-  const { openSpotlight, toggleNavDrawer, setFoldingCommand } =
+  const { setFoldingCommand, toggleNavDrawer, triggerCommandPalette } =
     useUIStateStore();
+
+  // Local state for the editable title functionality
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleValue, setTitleValue] = useState(currentPage?.name || "");
 
   const isMobile = useMediaQuery("(max-width: 768px)");
   const router = useRouter();
 
+  // Effect to sync the local title input with the global state when the page changes
+  useEffect(() => {
+    if (currentPage) {
+      setTitleValue(currentPage.name);
+    } else {
+      setTitleValue("");
+    }
+  }, [currentPage]);
+
+  // --- ACTION HANDLERS ---
+
+  const handleTitleSave = () => {
+    if (titleValue.trim() && titleValue !== currentPage?.name) {
+      // Dispatch the action to update the page name in the global store
+      updatePageMetadata({ name: titleValue });
+    }
+    setIsEditingTitle(false);
+  };
+
   const handleSave = () => {
-    /* ... placeholder ... */
+    console.log("TODO: Implement Save logic");
   };
   const handleRunAll = () => {
-    /* ... placeholder ... */
+    console.log("TODO: Implement Run All logic");
   };
   const goToHome = () => {
-    setCurrentPage(null);
+    setCurrentPage(null); // Clear the current page from the session state
     router.push("/");
   };
 
+  // --- DESKTOP MENU COMPONENT ---
   const DesktopMenus = () => (
     <Group gap="xs">
       <Menu shadow="md" width={200}>
@@ -69,12 +101,11 @@ export default function TopBar() {
             File
           </Button>
         </Menu.Target>
-        {/* ... File menu content ... */}
         <Menu.Dropdown>
           <Menu.Item disabled>New Page...</Menu.Item>
           <Menu.Item
             onClick={handleSave}
-            disabled={!currentPage}
+            disabled={!currentPage || !isDirty}
             rightSection={<Kbd size="xs">Ctrl+S</Kbd>}
           >
             Save
@@ -111,7 +142,6 @@ export default function TopBar() {
             Graph View
           </Menu.Item>
           <Menu.Divider />
-
           <Menu.Label>Content Filters</Menu.Label>
           <Menu.Item
             onClick={() => setShowNarrative(!showNarrative)}
@@ -132,18 +162,12 @@ export default function TopBar() {
             Show Block Code
           </Menu.Item>
           <Menu.Divider />
-
-          {/* --- DEFINITIVE FIX: WIRE UP FOLDING ACTIONS --- */}
           <Menu.Label>Folding Actions</Menu.Label>
           <Menu.Item onClick={() => setFoldingCommand("collapseAll")}>
-            Collapse All Blocks
+            Collapse All
           </Menu.Item>
           <Menu.Item onClick={() => setFoldingCommand("expandAll")}>
-            Expand All Blocks
-          </Menu.Item>
-          {/* TODO: Implement a more granular `collapseCode` that leaves metadata open */}
-          <Menu.Item onClick={() => setFoldingCommand("collapseAll")}>
-            Collapse All Code
+            Expand All
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>
@@ -154,7 +178,6 @@ export default function TopBar() {
             Run
           </Button>
         </Menu.Target>
-        {/* ... Run menu content ... */}
         <Menu.Dropdown>
           <Menu.Item
             onClick={handleRunAll}
@@ -177,7 +200,6 @@ export default function TopBar() {
             Panels
           </Button>
         </Menu.Target>
-        {/* ... Panels menu content ... */}
         <Menu.Dropdown>
           <Menu.Item
             onClick={() => toggleNavigator()}
@@ -202,17 +224,16 @@ export default function TopBar() {
     </Group>
   );
 
-  // The rest of the component (main return statement) is unchanged.
-  // ... copy the rest of the component from the previous correct version ...
+  // --- MAIN RENDER ---
   return (
     <Box
       component="header"
       px="sm"
       py="xs"
-      className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 flex-shrink-0 gap-4"
+      className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 flex-shrink-0 gap-4 h-[50px]"
     >
       {/* Left Section: Navigation and Menus */}
-      <Group gap="xs" align="center">
+      <Group gap="xs" align="center" style={{ flexShrink: 0 }}>
         {isMobile ? (
           <>
             <Tooltip label="Toggle Workspace Navigator">
@@ -253,56 +274,74 @@ export default function TopBar() {
         )}
       </Group>
 
-      {/* Center Section: Universal Search */}
+      {/* Center Section is now empty, delegating search to Command Palette */}
+      {/* Center Section: Command Palette Trigger */}
       {!isMobile && (
         <Group justify="center" style={{ flex: 1 }}>
           <UnstyledButton
-            onClick={openSpotlight}
+            onClick={triggerCommandPalette}
             className="w-full max-w-sm px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
           >
             <Group gap="xs" justify="space-between">
               <Group gap="xs">
                 <IconSearch size={16} />
-                <Text>Search or navigate to...</Text>
+                <Text>Search or run a command...</Text>
               </Group>
-              <Kbd>Ctrl+K</Kbd>
+              <Kbd>Ctrl+Shift+P</Kbd>
             </Group>
           </UnstyledButton>
         </Group>
       )}
 
-      {/* Right Section: Page Context and Mobile Actions */}
-      <Group
-        gap="xs"
-        justify="flex-end"
-        style={isMobile ? { flex: 1, minWidth: 0 } : { minWidth: "200px" }}
-      >
-        {currentPage && (
-          <Text size="xs" c="dimmed" truncate>
-            {currentPage.name}
-          </Text>
-        )}
+      {/* Right Section: Editable Title */}
+      <Group gap="xs" justify="flex-end" style={{ flex: 1, minWidth: 0 }}>
+        {currentPage &&
+          (isEditingTitle ? (
+            <TextInput
+              value={titleValue}
+              onChange={(e) => setTitleValue(e.currentTarget.value)}
+              onBlur={handleTitleSave}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleTitleSave();
+                if (e.key === "Escape") {
+                  setTitleValue(currentPage.name); // Revert changes on escape
+                  setIsEditingTitle(false);
+                }
+              }}
+              size="xs"
+              autoFocus
+              styles={{ input: { textAlign: "right" } }}
+              className="flex-grow max-w-[400px]"
+            />
+          ) : (
+            <Tooltip label="Click to rename" openDelay={500}>
+              <UnstyledButton
+                onClick={() => setIsEditingTitle(true)}
+                className="flex-grow min-w-0"
+              >
+                <Text size="sm" c="dimmed" truncate ta="right">
+                  {currentPage.name}
+                  {isDirty ? "*" : ""}
+                </Text>
+              </UnstyledButton>
+            </Tooltip>
+          ))}
         {isMobile && currentPage && (
-          <Group>
-            <ActionIcon variant="subtle" color="gray" onClick={openSpotlight}>
-              <IconSearch size={18} />
-            </ActionIcon>
-            <Menu shadow="md" width={200}>
-              <Menu.Target>
-                <ActionIcon variant="subtle" color="gray">
-                  <IconDotsVertical size={18} />
-                </ActionIcon>
-              </Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Item onClick={handleRunAll}>Run All Blocks</Menu.Item>
-                <Menu.Item onClick={handleSave}>Save</Menu.Item>
-                <Menu.Divider />
-                <Menu.Item onClick={clearAllBlockResults} color="red">
-                  Clear All Outputs
-                </Menu.Item>
-              </Menu.Dropdown>
-            </Menu>
-          </Group>
+          <Menu shadow="md" width={200}>
+            <Menu.Target>
+              <ActionIcon variant="subtle" color="gray">
+                <IconDotsVertical size={18} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item onClick={handleRunAll}>Run All Blocks</Menu.Item>
+              <Menu.Item onClick={handleSave}>Save</Menu.Item>
+              <Menu.Divider />
+              <Menu.Item onClick={clearAllBlockResults} color="red">
+                Clear All Outputs
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
         )}
       </Group>
     </Box>

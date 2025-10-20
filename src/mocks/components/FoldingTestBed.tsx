@@ -5,6 +5,7 @@ import React, { useRef } from "react";
 import Editor, { OnMount } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
 import { Button, Group } from "@mantine/core";
+import ActionableSummaryWidget from "@/widgets/Notebook/components/ActionableSummaryWidget";
 
 const log = (message: string, ...args: any[]) =>
   console.log(`[FoldingTestBed] ${message}`, ...args);
@@ -141,6 +142,23 @@ export default function FoldingTestBed() {
         <Button onClick={handleExpandAll} size="xs">
           Expand All
         </Button>
+      </Group>
+      <Group mb="md" style={{ height: "36px", border: "1px dashed #ccc" }}>
+        <ActionableSummaryWidget
+          title="Monthly Billing Report"
+          primaryActionLabel="Parameters"
+          onPrimaryAction={() => alert("Parameters clicked!")}
+          onRawAction={() => alert("Raw clicked!")}
+        />
+      </Group>
+      <Group mb="md" style={{ height: "36px", border: "1px dashed #ccc" }}>
+        <ActionableSummaryWidget
+          title="get_transactions"
+          subtitle="sql"
+          primaryActionLabel="Config"
+          onPrimaryAction={() => alert("Config clicked!")}
+          onRawAction={() => alert("Raw clicked!")}
+        />
       </Group>
       <div style={{ height: "400px" }}>
         <Editor

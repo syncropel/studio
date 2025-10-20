@@ -2,7 +2,17 @@
 
 import React, { useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader, Center, Modal, Box, Drawer, Text } from "@mantine/core";
+import {
+  Loader,
+  Center,
+  Modal,
+  Box,
+  Drawer,
+  Text,
+  Stack,
+  Title,
+  Button,
+} from "@mantine/core";
 import { useHotkeys, useMediaQuery } from "@mantine/hooks";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { ReadyState } from "react-use-websocket";
@@ -35,6 +45,7 @@ import ConnectionManager from "@/widgets/ConnectionManager";
 import WelcomeScreen from "@/widgets/WelcomeScreen";
 import FoldingTest from "@/mocks/components/FoldingTest";
 import FoldingTestBed from "@/mocks/components/FoldingTestBed";
+import FoldingTestActionRegions from "@/mocks/components/FoldingTestActionRegions";
 
 export default function StudioClientRoot() {
   // --- CORE HOOKS ---
@@ -139,12 +150,25 @@ export default function StudioClientRoot() {
   }
 
   // Main content switcher based on connection and page state
+  // --- Main content switcher based on connection and page state ---
   const renderMainContent = () => {
     if (!activeProfile) {
+      // We still need a screen to prompt the user to connect if no profile is active.
+      // This can be a very simple component or the old WelcomeScreen.
+      // For now, a simple button is clean and effective.
       return (
-        <WelcomeScreen onConnectClick={() => toggleConnectionManager(true)} />
+        <Center h="100%" className="p-4">
+          <Stack align="center">
+            <Title order={2}>Welcome to Syncropel Studio</Title>
+            <Text c="dimmed">Connect to a server to get started.</Text>
+            <Button mt="md" onClick={() => toggleConnectionManager(true)}>
+              Manage Connections
+            </Button>
+          </Stack>
+        </Center>
       );
     }
+
     if (readyState === ReadyState.CONNECTING) {
       return (
         <Center h="100%">
@@ -153,9 +177,15 @@ export default function StudioClientRoot() {
         </Center>
       );
     }
+
     if (readyState === ReadyState.OPEN) {
-      return currentPage ? <Notebook /> : <Homepage />;
+      // --- THIS IS THE KEY CHANGE ---
+      // We ALWAYS render the Notebook component once connected.
+      // The Notebook component itself is now responsible for showing either
+      // the welcome/prompt view (if currentPage is null) or the full editor.
+      return <Notebook />;
     }
+
     // Default to a disconnected/error state
     return (
       <Center h="100%" className="p-4">
@@ -175,7 +205,7 @@ export default function StudioClientRoot() {
   // --- MAIN COMPONENT JSX ---
   return (
     <main className="relative h-screen w-screen flex flex-col bg-white dark:bg-gray-950 text-black dark:text-white overflow-hidden">
-      {/* <FoldingTestBed /> */}
+      {/* <FoldingTestActionRegions /> */}
       {/* <FoldingTest /> */}
       {/* --- MODALS & DRAWERS (Global Overlays) --- */}
       <Modal

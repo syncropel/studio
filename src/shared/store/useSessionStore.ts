@@ -51,6 +51,7 @@ interface SessionStore {
   blockResults: Record<string, BlockResult | undefined>;
   selectedBlockId: string | null;
   inspectedArtifacts: InspectedArtifact[]; // For the "Data Tray" / Inspector
+  isDirty: boolean;
 
   // --- ACTIONS ---
   setLastJsonMessage: (message: InboundMessage | null) => void;
@@ -72,6 +73,9 @@ interface SessionStore {
   clearBlockResult: (blockId: string) => void;
   clearAllBlockResults: () => void;
   reset: () => void;
+  updatePageMetadata: (
+    metadata: Partial<{ name: string; description: string }>
+  ) => void;
 }
 
 const initialState = {
@@ -88,6 +92,7 @@ const initialState = {
   blockResults: {},
   selectedBlockId: null,
   inspectedArtifacts: [],
+  isDirty: false,
 };
 
 export const useSessionStore = create<SessionStore>((set) => ({
@@ -159,7 +164,10 @@ export const useSessionStore = create<SessionStore>((set) => ({
       const newBlocks = state.currentPage.blocks.map((block) =>
         block.id === blockId ? { ...block, content: newContent } : block
       );
-      return { currentPage: { ...state.currentPage, blocks: newBlocks } };
+      return {
+        currentPage: { ...state.currentPage, blocks: newBlocks },
+        isDirty: true,
+      };
     }),
   updatePageParameter: (key, value) =>
     set((state) => ({
@@ -186,4 +194,11 @@ export const useSessionStore = create<SessionStore>((set) => ({
   clearAllBlockResults: () => set({ blockResults: {} }),
 
   reset: () => set(initialState),
+  updatePageMetadata: (metadata) =>
+    set((state) => ({
+      currentPage: state.currentPage
+        ? { ...state.currentPage, ...metadata }
+        : null,
+      isDirty: true,
+    })),
 }));

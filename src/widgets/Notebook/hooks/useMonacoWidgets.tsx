@@ -1,27 +1,17 @@
-// /home/dpwanjala/repositories/syncropel/studio/src/widgets/Notebook/hooks/useMonacoWidgets.tsx
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as monaco from "monaco-editor";
 import { ContextualPage, BlockResult } from "@/shared/types/notebook";
+import { useSessionStore } from "@/shared/store/useSessionStore";
+import { useUIStateStore } from "@/shared/store/useUIStateStore";
 import { ManagedViewZoneWidget } from "../lib/ManagedViewZoneWidget";
 import ParametersForm from "../ParametersForm";
 import OutputViewer from "@/widgets/OutputViewer";
 
-const log = (message: string, ...args: any[]) =>
-  console.log(`[useMonacoWidgets] ${message}`, ...args);
-
 // --- Helper Functions ---
 
-/**
- * Finds the end line of a code block in the notebook format.
- * Notebook blocks have two code fences: one for metadata, one for actual code.
- *
- * @param model - The Monaco editor text model
- * @param startLine - The line number where the block starts
- * @returns The line number where the code block ends
- */
 const findBlockEndLine = (
   model: monaco.editor.ITextModel,
   startLine: number
@@ -40,295 +30,214 @@ const findBlockEndLine = (
       }
     }
   }
-  return startLine; // Fallback to start line if structure is malformed
+  return startLine; // Fallback
 };
 
-/**
- * Finds the end line of YAML frontmatter in the notebook.
- * Frontmatter is delimited by --- markers.
- *
- * @param model - The Monaco editor text model
- * @returns The line number where frontmatter ends, or 0 if no frontmatter exists
- */
 const findFrontmatterEndLine = (model: monaco.editor.ITextModel): number => {
-  // Check if the first line starts with frontmatter delimiter
   if (!model.getLineContent(1).startsWith("---")) return 0;
-
-  // Find the closing delimiter
   for (let i = 2; i <= model.getLineCount(); i++) {
     if (model.getLineContent(i).startsWith("---")) return i;
   }
-
-  return 0; // No closing delimiter found
+  return 0;
 };
 
 /**
- * Determines the initial height for a widget before ResizeObserver takes over.
- * This provides a reasonable starting point to avoid flash of collapsed content.
- *
- * For dynamic height widgets, this is just the initial size - the ResizeObserver
- * will adjust it based on actual rendered content.
- *
- * @param result - The block execution result
- * @returns Initial height in pixels
+ * Determines a predictable, fixed height for a widget based on its content type.
+ * This strategy prioritizes layout stability over pixel-perfect dynamic sizing.
+ * @param result The BlockResult to analyze.
+ * @returns A height in pixels.
  */
-const getInitialWidgetHeight = (result: BlockResult | undefined): number => {
-  if (!result) return 200; // Default for unknown state
+const getWidgetHeight = (result: BlockResult | undefined): number => {
+  if (!result) return 0;
 
   switch (result.status) {
     case "running":
-      // Small, fixed height for loading spinner
-      return 80;
-
+      return 60; // A small, fixed height for a loading spinner
     case "error":
-      // Reasonable height for error messages (will grow if needed)
-      return 150;
-
+      return 80; // A reasonable height for a typical error message
     case "success":
       if (result.output.data_ref) {
-        // "Claim Check" card has consistent size
-        return 120;
+        // This is a "Claim Check" card, which has a consistent size.
+        return 100;
       }
       if (result.output.inline_data) {
-        // Large initial size for tables, JSON, etc. (will adjust dynamically)
-        return 300;
+        // For any rendered content like tables or large JSON,
+        // we provide a generous maximum height. The content inside will scroll.
+        return 400;
       }
-      // Simple success message
-      return 80;
-
+      return 60; // For a simple "Success (no output)" message
     default:
-      // Pending or unknown status
-      return 200;
+      return 0; // Don't render a zone for 'pending' or unknown statuses
   }
 };
 
 /**
  * A custom hook to manage all IViewZone widgets for a Syncropel Notebook.
- *
- * This hook orchestrates the creation, updates, and cleanup of interactive
- * overlays in the Monaco Editor. It supports two rendering strategies:
- *
- * 1. **Fixed Height**: Used for UI elements with predictable sizes (e.g., parameter forms)
- * 2. **Dynamic Height**: Used for content with variable sizes (e.g., execution outputs)
- *
- * Dynamic height widgets use a debounced ResizeObserver to automatically adjust
- * their height based on rendered content, with configurable min/max constraints.
- *
- * @param editor - The Monaco Editor instance, or null if not ready
- * @param currentPage - The currently loaded ContextualPage
- * @param blockResults - A record of execution results for each block
- * @returns An array of React Portals to be rendered at the top level of the app
+ * This includes both block outputs and on-demand forms for parameters/config.
  */
 export function useMonacoWidgets(
   editor: monaco.editor.IStandaloneCodeEditor | null,
   currentPage: ContextualPage | null,
   blockResults: Record<string, BlockResult | undefined>
 ): React.ReactPortal[] {
-  // Store references to all active widgets for lifecycle management
   const widgetRefs = useRef<Map<string, ManagedViewZoneWidget>>(new Map());
-
-  // React portals that will be rendered at the component's root
   const [portals, setPortals] = useState<React.ReactPortal[]>([]);
 
+  // CHANGE: Track the previous page to detect page changes
+  const prevPageRef = useRef<string | null>(null);
+
+  // Subscribe to the global state that controls form visibility.
+  const { activeFormWidgetIds, closeAllFormWidgets } = useUIStateStore();
+
+  // CHANGE: Separate effect to handle page changes and form cleanup
+  // This prevents the infinite loop by not depending on activeFormWidgetIds
   useEffect(() => {
-    // ============================================================
-    // GUARD CLAUSE 1: Editor or Page Not Ready
-    // ============================================================
+    const currentPageId = currentPage?.id || null;
+
+    // Only close forms when the page actually changes (not on every render)
+    if (prevPageRef.current !== null && prevPageRef.current !== currentPageId) {
+      closeAllFormWidgets();
+    }
+
+    // Update the ref to track the current page
+    prevPageRef.current = currentPageId;
+  }, [currentPage?.id, closeAllFormWidgets]);
+
+  // CHANGE: Main effect for widget management
+  // This effect now only depends on the data it needs, not on closeAllFormWidgets
+  useEffect(() => {
+    // Guard Clause 1: If the editor isn't ready or there's no page, perform a full cleanup.
     if (!editor || !currentPage) {
-      // Perform full cleanup if we previously had widgets
       if (widgetRefs.current.size > 0) {
-        log("Editor or page not ready. Cleaning up all widgets.");
         widgetRefs.current.forEach((widget) => widget.dispose());
         widgetRefs.current.clear();
         setPortals([]);
       }
+      // CHANGE: Removed closeAllFormWidgets() call from here to prevent infinite loop
       return;
     }
 
     const model = editor.getModel();
-    if (!model) {
-      log("No editor model available.");
-      return;
-    }
+    if (!model) return;
 
-    // ============================================================
-    // INITIALIZATION
-    // ============================================================
     const nextPortals: React.ReactPortal[] = [];
     const activeWidgetIds = new Set<string>();
-
-    // Calculate available width for widgets (accounting for scrollbar)
     const editorContentWidth =
       editor.getLayoutInfo().contentWidth -
       editor.getLayoutInfo().verticalScrollbarWidth;
 
-    log(`Processing widgets for page: ${currentPage.id}`);
+    // --- RENDER ACTIVE FORM WIDGETS ---
+    // Iterate over the set of form IDs that should be visible.
+    activeFormWidgetIds.forEach((widgetId) => {
+      let position: number | null = null;
+      let component: React.ReactNode | null = null;
+      let height = 150; // Default height for forms
 
-    // ============================================================
-    // WIDGET 1: PAGE PARAMETERS FORM (Fixed Height)
-    // ============================================================
-    const frontmatterEndLine = findFrontmatterEndLine(model);
+      if (widgetId === "page-parameters") {
+        position = findFrontmatterEndLine(model);
+        component = <ParametersForm />;
+        height = 150;
+      } else if (widgetId.startsWith("config-")) {
+        // TODO: Logic for block config forms will go here in the future.
+        // const blockId = widgetId.replace('config-', '');
+        // position = ... find block position ...
+        // component = <BlockConfigForm blockId={blockId} />;
+      }
 
-    if (
-      currentPage.inputs &&
-      Object.keys(currentPage.inputs).length > 0 &&
-      frontmatterEndLine > 0
-    ) {
-      const widgetId = "page-parameters";
-      activeWidgetIds.add(widgetId);
-
-      // Fixed height for stability - forms don't need dynamic sizing
-      const height = 150;
-
-      let widget = widgetRefs.current.get(widgetId);
-
-      if (!widget) {
-        // Create new widget with fixed height configuration
-        log(`Creating page parameters widget with fixed height: ${height}px`);
-        widget = new ManagedViewZoneWidget(
-          editor,
-          widgetId,
-          frontmatterEndLine,
-          height,
-          {
-            dynamicHeight: false, // Fixed height for stability
-          }
+      if (position && component) {
+        activeWidgetIds.add(widgetId);
+        let widget = widgetRefs.current.get(widgetId);
+        if (!widget) {
+          widget = new ManagedViewZoneWidget(
+            editor,
+            widgetId,
+            position,
+            height
+          );
+          widget.attach();
+          widgetRefs.current.set(widgetId, widget);
+        } else {
+          widget.update(position, height);
+        }
+        const portalTarget = widget.getPortalTarget();
+        portalTarget.style.width = `${editorContentWidth}px`;
+        nextPortals.push(
+          createPortal(
+            <div className="output-view-zone with-scrolling">{component}</div>,
+            portalTarget,
+            widgetId
+          )
         );
-        widget.attach();
-        widgetRefs.current.set(widgetId, widget);
-      } else {
-        // Update existing widget (line number might have changed)
-        widget.update(frontmatterEndLine, height);
       }
-
-      // Configure portal target styling
-      const portalTarget = widget.getPortalTarget();
-      portalTarget.style.width = `${editorContentWidth}px`;
-      portalTarget.style.pointerEvents = "auto"; // Ensure interactivity
-
-      // Create portal with ParametersForm
-      nextPortals.push(
-        createPortal(
-          <div className="output-view-zone with-scrolling">
-            <ParametersForm />
-          </div>,
-          portalTarget,
-          widgetId
-        )
-      );
-    }
-
-    // ============================================================
-    // WIDGET 2: BLOCK OUTPUT VIEWERS (Dynamic Height)
-    // ============================================================
-    currentPage.blocks.forEach((block) => {
-      const blockId = block.id;
-      const result = blockResults[blockId];
-
-      // Only render widgets for blocks with results
-      if (!result) {
-        return;
-      }
-
-      // Find the block's position in the document
-      const match = model.findNextMatch(
-        `id: ${block.id}`,
-        { lineNumber: 1, column: 1 },
-        false, // isRegex
-        true, // matchCase
-        null, // wordSeparators
-        false // captureMatches
-      );
-
-      if (!match) {
-        log(`Could not find block ${blockId} in document`);
-        return;
-      }
-
-      activeWidgetIds.add(blockId);
-
-      // Find where this block ends (after its code fence)
-      const endLine = findBlockEndLine(model, match.range.startLineNumber);
-
-      // Get appropriate initial height based on result type
-      const initialHeight = getInitialWidgetHeight(result);
-
-      let widget = widgetRefs.current.get(blockId);
-
-      if (!widget) {
-        // Create new widget with dynamic height configuration
-        log(
-          `Creating output widget for block ${blockId} with dynamic height (initial: ${initialHeight}px)`
-        );
-        widget = new ManagedViewZoneWidget(
-          editor,
-          blockId,
-          endLine,
-          initialHeight,
-          {
-            dynamicHeight: true, // Enable ResizeObserver
-            minHeight: 60, // Don't collapse below this
-            maxHeight: 600, // Don't expand beyond this (prevents excessive growth)
-            debounceMs: 150, // Wait 150ms after resize stops before updating
-            heightThreshold: 5, // Only update if height changes by 5+ pixels
-          }
-        );
-        widget.attach();
-        widgetRefs.current.set(blockId, widget);
-      } else {
-        // Update existing widget
-        // For dynamic height widgets, we only update line number
-        // The ResizeObserver handles height automatically
-        widget.update(endLine);
-      }
-
-      // Configure portal target styling
-      const portalTarget = widget.getPortalTarget();
-      portalTarget.style.width = `${editorContentWidth}px`;
-      portalTarget.style.pointerEvents = "auto"; // Ensure interactivity
-
-      // Create portal with OutputViewer
-      nextPortals.push(
-        createPortal(
-          <div className="output-view-zone with-scrolling">
-            <OutputViewer blockResult={result} />
-          </div>,
-          portalTarget,
-          blockId
-        )
-      );
     });
 
-    // ============================================================
-    // CLEANUP: Remove Stale Widgets
-    // ============================================================
-    const staleWidgets: string[] = [];
+    // --- RENDER OUTPUT WIDGETS ---
+    Object.entries(blockResults).forEach(([blockId, result]) => {
+      if (
+        result &&
+        (result.status === "success" ||
+          result.status === "error" ||
+          result.status === "running")
+      ) {
+        const match = model.findNextMatch(
+          `id: ${blockId}`,
+          { lineNumber: 1, column: 1 },
+          false,
+          true,
+          null,
+          false
+        );
+        if (!match) return;
 
+        // Use a unique ID for output widgets to avoid conflicts with form widgets
+        const widgetId = `output-${blockId}`;
+        activeWidgetIds.add(widgetId);
+        const endLine = findBlockEndLine(model, match.range.startLineNumber);
+        const height = getWidgetHeight(result);
+
+        if (height > 0) {
+          let widget = widgetRefs.current.get(widgetId);
+          if (!widget) {
+            widget = new ManagedViewZoneWidget(
+              editor,
+              widgetId,
+              endLine,
+              height
+            );
+            widget.attach();
+            widgetRefs.current.set(widgetId, widget);
+          } else {
+            widget.update(endLine, height);
+          }
+          const portalTarget = widget.getPortalTarget();
+          portalTarget.style.width = `${editorContentWidth}px`;
+          nextPortals.push(
+            createPortal(
+              <div className="output-view-zone with-scrolling">
+                <OutputViewer blockResult={result} />
+              </div>,
+              portalTarget,
+              widgetId
+            )
+          );
+        }
+      }
+    });
+
+    // --- Cleanup Stale Widgets ---
+    // Iterate over a copy of the keys to safely delete from the map while iterating.
     [...widgetRefs.current.keys()].forEach((widgetId) => {
       if (!activeWidgetIds.has(widgetId)) {
-        staleWidgets.push(widgetId);
-        const widget = widgetRefs.current.get(widgetId);
-        widget?.dispose();
+        widgetRefs.current.get(widgetId)?.dispose();
         widgetRefs.current.delete(widgetId);
       }
     });
 
-    if (staleWidgets.length > 0) {
-      log(
-        `Cleaned up ${staleWidgets.length} stale widgets: ${staleWidgets.join(
-          ", "
-        )}`
-      );
-    }
-
-    // ============================================================
-    // FINALIZATION: Update Portals
-    // ============================================================
-    log(
-      `Created ${nextPortals.length} portals for ${activeWidgetIds.size} active widgets`
-    );
     setPortals(nextPortals);
-  }, [editor, currentPage, blockResults]);
+
+    // CHANGE: Removed closeAllFormWidgets from this dependency array
+    // It's now handled in a separate effect above
+  }, [editor, currentPage, blockResults, activeFormWidgetIds]);
 
   return portals;
 }
