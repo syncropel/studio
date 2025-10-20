@@ -33,6 +33,8 @@ import Spotlight from "@/widgets/Spotlight";
 import BottomActionBar from "@/widgets/BottomActionBar";
 import ConnectionManager from "@/widgets/ConnectionManager";
 import WelcomeScreen from "@/widgets/WelcomeScreen";
+import FoldingTest from "@/mocks/components/FoldingTest";
+import FoldingTestBed from "@/mocks/components/FoldingTestBed";
 
 export default function StudioClientRoot() {
   // --- CORE HOOKS ---
@@ -173,6 +175,8 @@ export default function StudioClientRoot() {
   // --- MAIN COMPONENT JSX ---
   return (
     <main className="relative h-screen w-screen flex flex-col bg-white dark:bg-gray-950 text-black dark:text-white overflow-hidden">
+      {/* <FoldingTestBed /> */}
+      {/* <FoldingTest /> */}
       {/* --- MODALS & DRAWERS (Global Overlays) --- */}
       <Modal
         opened={isSpotlightVisible}

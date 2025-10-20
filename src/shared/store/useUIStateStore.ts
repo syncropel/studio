@@ -1,12 +1,18 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/shared/store/useUIStateStore.ts
 import { create } from "zustand";
+
+// Define the possible folding commands we can issue.
+export type FoldingCommand = "collapseAll" | "expandAll" | "collapseCode";
 
 interface UIStateStore {
   // --- STATE ---
-  // Visibility state for modals and mobile drawers. These should reset on page load.
   isSpotlightVisible: boolean;
   isConnectionManagerOpen: boolean;
   isNavDrawerOpen: boolean;
   isInspectorDrawerOpen: boolean;
+
+  // New state to act as a command bus for folding actions.
+  foldingCommand: FoldingCommand | null;
 
   // --- ACTIONS ---
   openSpotlight: () => void;
@@ -14,6 +20,9 @@ interface UIStateStore {
   toggleConnectionManager: (open?: boolean) => void;
   toggleNavDrawer: (open?: boolean) => void;
   toggleInspectorDrawer: (open?: boolean) => void;
+
+  // New action to dispatch a folding command.
+  setFoldingCommand: (command: FoldingCommand | null) => void;
 }
 
 export const useUIStateStore = create<UIStateStore>((set) => ({
@@ -22,8 +31,9 @@ export const useUIStateStore = create<UIStateStore>((set) => ({
   isConnectionManagerOpen: false,
   isNavDrawerOpen: false,
   isInspectorDrawerOpen: false,
+  foldingCommand: null,
 
-  // Actions to update the state
+  // Actions
   openSpotlight: () => set({ isSpotlightVisible: true }),
   closeSpotlight: () => set({ isSpotlightVisible: false }),
   toggleConnectionManager: (open) =>
@@ -40,4 +50,7 @@ export const useUIStateStore = create<UIStateStore>((set) => ({
       isInspectorDrawerOpen:
         open === undefined ? !state.isInspectorDrawerOpen : open,
     })),
+
+  // New action implementation
+  setFoldingCommand: (command) => set({ foldingCommand: command }),
 }));

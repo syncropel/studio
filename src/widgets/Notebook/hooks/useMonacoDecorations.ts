@@ -32,17 +32,10 @@ export function useMonacoDecorations(
     }
   }, [editor]);
 
-  // This is the main effect for calculating and applying all decorations.
-  // It re-runs whenever the page or any block result changes.
   useEffect(() => {
     const collection = decorationsCollectionRef.current;
+    if (!collection) return;
 
-    // Guard Clause 1: If the collection isn't ready, do nothing.
-    if (!collection) {
-      return;
-    }
-
-    // Guard Clause 2: If there's no page or editor, clear any old decorations and exit.
     if (!editor || !currentPage) {
       collection.clear();
       return;
@@ -51,15 +44,14 @@ export function useMonacoDecorations(
     const model = editor.getModel();
     if (!model) return;
 
-    // Start with a fresh array for the new set of decorations.
     const newDecorations: monaco.editor.IModelDeltaDecoration[] = [];
 
-    // --- Decoration 1: Page-level "Run All" Button ---
+    // --- Decoration 1: Page-level "Run All" Button on Line 1 ---
     newDecorations.push({
       range: {
-        startLineNumber: 2,
+        startLineNumber: 1,
         startColumn: 1,
-        endLineNumber: 2,
+        endLineNumber: 1,
         endColumn: 1,
       },
       options: {
@@ -69,55 +61,61 @@ export function useMonacoDecorations(
       },
     });
 
-    // --- Decoration 2: Block-level Status Icons ---
-    currentPage.blocks.forEach((block) => {
-      // Find the precise line number for each block's ID in the text.
-      const match = model.findNextMatch(
-        `id: ${block.id}`,
-        { lineNumber: 1, column: 1 },
-        false,
-        true,
-        null,
-        false
-      );
+    // --- START: DEFINITIVE FIX FOR BLOCK DECORATION PLACEMENT ---
+    // We iterate through the text model to find the correct line for each block's decoration.
+    for (let i = 1; i <= model.getLineCount(); i++) {
+      const lineText = model.getLineContent(i);
 
-      if (match) {
-        const startLine = match.range.startLineNumber;
-        const result = blockResults[block.id];
-        let className = "glyph-run"; // Default "play" icon
-
-        if (result) {
-          switch (result.status) {
-            case "running":
-              className = "glyph-running";
-              break;
-            case "success":
-              className = "glyph-success";
-              break;
-            case "error":
-              className = "glyph-error";
-              break;
+      // A block's visual start is its ` ```yaml ` fence.
+      if (lineText.startsWith("```yaml")) {
+        let blockId: string | null = null;
+        // Look ahead a few lines to find the block's ID to confirm it's a cx_block.
+        for (let j = i + 1; j < i + 10 && j <= model.getLineCount(); j++) {
+          const innerLine = model.getLineContent(j);
+          if (innerLine.startsWith("```")) break; // Reached end of metadata
+          const match = innerLine.match(/^\s*id:\s*(\S+)/);
+          if (match) {
+            blockId = match[1];
+            break;
           }
         }
 
-        newDecorations.push({
-          range: {
-            startLineNumber: startLine,
-            startColumn: 1,
-            endLineNumber: startLine,
-            endColumn: 1,
-          },
-          options: {
-            isWholeLine: true,
-            glyphMarginClassName: `gutter-icon ${className}`,
-            glyphMarginHoverMessage: { value: `Run Block: ${block.id}` },
-          },
-        });
+        if (blockId) {
+          // We found a valid cx_block. Place the decoration on the ` ```yaml ` line (line `i`).
+          const startLine = i;
+          const result = blockResults[blockId];
+          let className = "glyph-run";
+          if (result) {
+            switch (result.status) {
+              case "running":
+                className = "glyph-running";
+                break;
+              case "success":
+                className = "glyph-success";
+                break;
+              case "error":
+                className = "glyph-error";
+                break;
+            }
+          }
+          newDecorations.push({
+            range: {
+              startLineNumber: startLine,
+              startColumn: 1,
+              endLineNumber: startLine,
+              endColumn: 1,
+            },
+            options: {
+              isWholeLine: true,
+              glyphMarginClassName: `gutter-icon ${className}`,
+              glyphMarginHoverMessage: { value: `Run Block: ${blockId}` },
+            },
+          });
+        }
       }
-    });
+    }
+    // --- END: DEFINITIVE FIX ---
 
-    // Atomically update the editor with the new set of decorations.
-    // The collection handles diffing and removing old ones automatically.
     collection.set(newDecorations);
   }, [editor, currentPage, blockResults]);
 }

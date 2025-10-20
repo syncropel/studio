@@ -1,71 +1,136 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/widgets/OutputViewer/index.tsx
 "use client";
 
-import React, { useState } from "react";
-import { Loader, Text, Box, Group, Button, Paper } from "@mantine/core";
-import { IconEye, IconDownload, IconAlertCircle } from "@tabler/icons-react";
+import React, { useState, useMemo } from "react";
+import {
+  Loader,
+  Text,
+  Box,
+  Group,
+  Button,
+  Paper,
+  Tooltip,
+  ActionIcon,
+  Modal,
+  Center,
+} from "@mantine/core";
+import {
+  IconEye,
+  IconDownload,
+  IconAlertCircle,
+  IconPin,
+  IconPinnedOff,
+  IconArrowsMaximize,
+  IconX,
+} from "@tabler/icons-react";
+import { useQueryClient } from "@tanstack/react-query";
 
-// Custom hook for fetching artifact data via the Data Plane
 import { useArtifactQuery } from "@/shared/hooks/useArtifactQuery";
-
-// Definitive type definitions from our new, correct architecture
+import { useSessionStore } from "@/shared/store/useSessionStore";
+import { useSettingsStore } from "@/shared/store/useSettingsStore";
 import type { BlockResult } from "@/shared/types/notebook";
-import type { DataRef, SDUIPayload } from "@/shared/api/types";
-
-// The intelligent renderer for all SDUI schemas
+import type {
+  DataRef,
+  SDUIPayload,
+  InspectedArtifact,
+} from "@/shared/api/types";
 import DynamicUIRenderer from "./renderers/DynamicUIRenderer";
 
-// ========================================================================
-//   SUB-COMPONENT: ArtifactRenderer (Handles "Claim Checks")
-// ========================================================================
-// This component's sole responsibility is to handle a `data_ref` payload. It
-// uses our custom `useArtifactQuery` hook to fetch large data artifacts on-demand.
+// Helper function to safely fetch artifact content
+const fetchArtifactContent = (dataRef: DataRef) => {
+  return fetch(
+    new URL(dataRef.access_url, window.location.origin).toString()
+  ).then((res) => {
+    if (!res.ok) throw new Error(`Failed to fetch artifact: ${res.statusText}`);
+    const contentType = res.headers.get("content-type");
+    if (contentType?.includes("application/json")) return res.json();
+    return res.text();
+  });
+};
 
-const ArtifactRenderer = ({ dataRef }: { dataRef: DataRef }) => {
-  // Local state to control when the query is enabled and should fire.
+// --- SUB-COMPONENT: ArtifactRenderer (Handles "Claim Checks") ---
+const ArtifactRenderer = ({
+  dataRef,
+  blockId,
+}: {
+  dataRef: DataRef;
+  blockId: string;
+}) => {
   const [isEnabled, setIsEnabled] = useState(false);
-
-  // Use our custom React Query hook to manage the async data fetching.
-  // It handles caching, loading states, and error states automatically.
   const { data, isLoading, isError, error } = useArtifactQuery(
     dataRef,
     isEnabled
   );
+  const { addInspectedArtifact, removeInspectedArtifact, inspectedArtifacts } =
+    useSessionStore();
+  const { isInspectorVisible, toggleInspector } = useSettingsStore();
+  const queryClient = useQueryClient();
+  const [isFocused, setIsFocused] = useState(false);
 
-  const handleDownload = () => {
-    // Open the secure artifact URL in a new tab to trigger a download.
+  const artifactId = `${blockId}-${dataRef.artifact_id}`;
+  const isPinned = useMemo(
+    () => inspectedArtifacts.some((art) => art.id === artifactId),
+    [artifactId, inspectedArtifacts]
+  );
+
+  const handleDownload = () =>
     window.open(
       new URL(dataRef.access_url, window.location.origin).toString(),
       "_blank"
     );
+
+  const handlePinToggle = async () => {
+    if (isPinned) {
+      removeInspectedArtifact(artifactId);
+      if (inspectedArtifacts.length === 1 && isInspectorVisible)
+        toggleInspector(false);
+      return;
+    }
+    try {
+      const content = await queryClient.fetchQuery({
+        queryKey: ["artifact", dataRef.artifact_id],
+        queryFn: () => fetchArtifactContent(dataRef),
+      });
+      const artifact: InspectedArtifact = {
+        id: artifactId,
+        runId: blockId,
+        artifactName: dataRef.metadata?.file_name || `Output of ${blockId}`,
+        content: content,
+        type: dataRef.renderer_hint as any,
+      };
+      addInspectedArtifact(artifact);
+      if (!isInspectorVisible) toggleInspector(true);
+    } catch (e) {
+      console.error("Failed to fetch artifact for pinning:", e);
+    }
   };
 
-  // State 1: Data has been successfully loaded.
-  if (data) {
-    // Construct the appropriate SDUI schema from the fetched data and the hint.
+  const contentWhenLoaded = useMemo(() => {
+    if (!data) return null;
     const schema: SDUIPayload = {
       ui_component: dataRef.renderer_hint,
       props: { data },
     };
     return <DynamicUIRenderer schema={schema} />;
-  }
+  }, [data, dataRef.renderer_hint]);
 
-  // State 2: Data is currently being fetched.
-  if (isLoading) {
-    return <Loader size="xs" />;
-  }
+  const mainContent = useMemo(() => {
+    if (data) return contentWhenLoaded;
+    if (isLoading)
+      return (
+        <Center my="md">
+          <Loader size="xs" />
+        </Center>
+      );
+    if (isError)
+      return (
+        <Text c="red" size="sm">
+          Error: {error.message}
+        </Text>
+      );
 
-  // State 3: An error occurred during the fetch.
-  if (isError) {
+    // Initial "Claim Check" card
     return (
-      <Text c="red" size="sm">
-        Error loading artifact: {error.message}
-      </Text>
-    );
-  }
-
-  // State 4: The initial "Claim Check" card, waiting for user interaction.
-  return (
-    <Paper withBorder p="sm" radius="md">
       <Group justify="space-between">
         <Box>
           <Text fw={500} size="sm">
@@ -73,9 +138,8 @@ const ArtifactRenderer = ({ dataRef }: { dataRef: DataRef }) => {
           </Text>
           <Text size="xs" c="dimmed">
             {dataRef.metadata?.record_count
-              ? `${dataRef.metadata.record_count} records`
-              : "Data is available."}{" "}
-            Click to load.
+              ? `${dataRef.metadata.record_count} records.`
+              : "Data available."}
           </Text>
         </Box>
         <Group>
@@ -83,7 +147,7 @@ const ArtifactRenderer = ({ dataRef }: { dataRef: DataRef }) => {
             variant="default"
             size="xs"
             leftSection={<IconEye size={14} />}
-            onClick={() => setIsEnabled(true)} // Enable and trigger the query on click.
+            onClick={() => setIsEnabled(true)}
           >
             Load Data Inline
           </Button>
@@ -97,88 +161,231 @@ const ArtifactRenderer = ({ dataRef }: { dataRef: DataRef }) => {
           </Button>
         </Group>
       </Group>
-    </Paper>
+    );
+  }, [data, isLoading, isError, dataRef, handleDownload, contentWhenLoaded]);
+
+  return (
+    <>
+      <Paper withBorder p="md" radius="md" className="relative">
+        {/* --- DEFINITIVE FIX: ADDED TOOLBAR TO ARTIFACT RENDERER --- */}
+        <Group gap="xs" className="absolute top-2 right-2 z-10">
+          <Tooltip
+            label={isPinned ? "Un-pin from Data Tray" : "Pin to Data Tray"}
+          >
+            <ActionIcon variant="default" size="sm" onClick={handlePinToggle}>
+              {isPinned ? <IconPinnedOff size={14} /> : <IconPin size={14} />}
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Focus Output">
+            <ActionIcon
+              variant="default"
+              size="sm"
+              onClick={() => setIsFocused(true)}
+            >
+              <IconArrowsMaximize size={14} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Close Output">
+            <ActionIcon
+              variant="default"
+              size="sm"
+              onClick={() =>
+                useSessionStore.getState().clearBlockResult(blockId)
+              }
+            >
+              <IconX size={14} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+
+        {/* --- DEFINITIVE FIX: ADD PADDING WHEN TOOLBAR IS VISIBLE --- */}
+        <Box pt={data ? "xl" : 0}>{mainContent}</Box>
+      </Paper>
+      <Modal
+        opened={isFocused}
+        onClose={() => setIsFocused(false)}
+        size="90%"
+        title={`Focused Output: ${blockId}`}
+      >
+        <Box style={{ maxHeight: "80vh", overflowY: "auto" }}>
+          {contentWhenLoaded || mainContent}
+        </Box>
+      </Modal>
+    </>
   );
 };
 
-// ========================================================================
-//   MAIN COMPONENT: OutputViewer
-// ========================================================================
-
+// --- MAIN COMPONENT: OutputViewer ---
 interface OutputViewerProps {
-  // This prop is now correctly typed to accept the new `BlockResult` union
-  // or `undefined` if no result exists for a block yet.
   blockResult: BlockResult | undefined;
 }
 
 export default function OutputViewer({ blockResult }: OutputViewerProps) {
-  /**
-   * This is the core rendering logic. It uses a type-safe switch statement
-   * to handle every possible state of a block's execution result.
-   */
-  const renderOutput = () => {
-    // If there's no result, or the block is pending, render nothing.
-    if (!blockResult || blockResult.status === "pending") {
-      return null;
+  const [isFocused, setIsFocused] = useState(false);
+  const {
+    clearBlockResult,
+    addInspectedArtifact,
+    removeInspectedArtifact,
+    inspectedArtifacts,
+  } = useSessionStore();
+  const { isInspectorVisible, toggleInspector } = useSettingsStore();
+
+  const blockId = (blockResult as any)?.block_id;
+
+  const artifactId = useMemo(() => {
+    if (blockResult?.status === "success" && blockResult.output.inline_data) {
+      return `${blockId}-inline-success`;
+    }
+    return null; // data_ref is handled by ArtifactRenderer
+  }, [blockResult, blockId]);
+
+  const isPinned = useMemo(() => {
+    if (!artifactId) return false;
+    return inspectedArtifacts.some((art) => art.id === artifactId);
+  }, [artifactId, inspectedArtifacts]);
+
+  const handlePinToggle = () => {
+    if (!artifactId) return;
+    if (isPinned) {
+      removeInspectedArtifact(artifactId);
+      if (inspectedArtifacts.length === 1 && isInspectorVisible)
+        toggleInspector(false);
+      return;
     }
 
-    // This is a "discriminated union". TypeScript is smart enough to know
-    // the exact shape of `blockResult` inside each `case` block.
+    if (blockResult?.status !== "success" || !blockResult.output.inline_data)
+      return;
+
+    const inlineData = blockResult.output.inline_data;
+    let content: any = null;
+    let type = "json";
+
+    if (inlineData.props && "data" in inlineData.props) {
+      content = (inlineData.props as { data: any }).data;
+    } else {
+      content = inlineData.props;
+    }
+    type = inlineData.ui_component;
+
+    const artifact: InspectedArtifact = {
+      id: artifactId,
+      runId: blockId,
+      artifactName: `Output of ${blockId}`,
+      content,
+      type: type as any,
+    };
+    addInspectedArtifact(artifact);
+    if (!isInspectorVisible) toggleInspector(true);
+  };
+
+  const renderOutput = () => {
+    if (!blockResult || blockResult.status === "pending") return null;
+
     switch (blockResult.status) {
       case "running":
-      case "skipped":
-        return <Loader size="xs" />;
-
+        return (
+          <Center my="md">
+            <Loader size="xs" />
+          </Center>
+        );
       case "error":
-        // Here, TypeScript knows `blockResult` is of type `BlockErrorFields`.
-        const { error } = blockResult;
         return (
-          <Group gap="xs" c="red" wrap="nowrap" align="flex-start">
-            <IconAlertCircle
-              size={16}
-              style={{ flexShrink: 0, marginTop: 2 }}
-            />
-            <Text size="sm" ff="monospace" style={{ whiteSpace: "pre-wrap" }}>
-              {error.message || "An unknown error occurred."}
-            </Text>
-          </Group>
+          <Paper withBorder p="md" radius="md">
+            <Group gap="xs" c="red" wrap="nowrap" align="flex-start">
+              {" "}
+              <IconAlertCircle
+                size={16}
+                style={{ flexShrink: 0, marginTop: 2 }}
+              />{" "}
+              <Text size="sm" ff="monospace" style={{ whiteSpace: "pre-wrap" }}>
+                {blockResult.error.message || "An unknown error occurred."}
+              </Text>{" "}
+            </Group>
+          </Paper>
         );
-
       case "success":
-        // Here, TypeScript knows `blockResult` is of type `BlockOutputFields`.
-        const { output } = blockResult;
-
-        if (output?.inline_data) {
-          // Case 1: Data is small and was sent inline in the WebSocket message.
-          return <DynamicUIRenderer schema={output.inline_data} />;
+        if (blockResult.output?.inline_data) {
+          return <DynamicUIRenderer schema={blockResult.output.inline_data} />;
         }
-        if (output?.data_ref) {
-          // Case 2: Data is large. Render the ArtifactRenderer to handle the "Claim Check".
-          return <ArtifactRenderer dataRef={output.data_ref} />;
+        if (blockResult.output?.data_ref) {
+          return (
+            <ArtifactRenderer
+              dataRef={blockResult.output.data_ref}
+              blockId={blockResult.block_id}
+            />
+          );
         }
-        // Case 3: The block succeeded but produced no visual output.
         return (
-          <Text c="dimmed" size="sm">
-            Success (no output).
-          </Text>
+          <Paper withBorder p="md" radius="md">
+            <Text c="dimmed" size="sm">
+              Success (no output).
+            </Text>
+          </Paper>
         );
-
       default:
-        // This default case handles any unexpected statuses gracefully.
         return null;
     }
   };
 
   const outputContent = renderOutput();
+  if (!outputContent) return null;
 
-  // Don't render the gray container box if there's nothing to show.
-  if (!outputContent) {
-    return null;
+  const isInlineData =
+    blockResult?.status === "success" && blockResult.output.inline_data;
+  const isErrorOrRunning =
+    blockResult?.status === "error" || blockResult?.status === "running";
+
+  // The main viewer only renders the toolbar for inline data. ArtifactRenderer handles its own.
+  if (!isInlineData) {
+    return outputContent;
   }
 
   return (
-    <Box mt="md" p="md" className="bg-gray-100 dark:bg-gray-800 rounded-md">
-      {outputContent}
-    </Box>
+    <>
+      <Paper withBorder p="md" radius="md" className="relative">
+        {!isErrorOrRunning && (
+          <Group gap="xs" className="absolute top-2 right-2 z-10">
+            <Tooltip
+              label={isPinned ? "Un-pin from Data Tray" : "Pin to Data Tray"}
+            >
+              <ActionIcon variant="default" size="sm" onClick={handlePinToggle}>
+                {isPinned ? <IconPinnedOff size={14} /> : <IconPin size={14} />}
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Focus Output">
+              <ActionIcon
+                variant="default"
+                size="sm"
+                onClick={() => setIsFocused(true)}
+              >
+                <IconArrowsMaximize size={14} />
+              </ActionIcon>
+            </Tooltip>
+            {blockId && (
+              <Tooltip label="Close Output">
+                <ActionIcon
+                  variant="default"
+                  size="sm"
+                  onClick={() => clearBlockResult(blockId)}
+                >
+                  <IconX size={14} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+          </Group>
+        )}
+        <Box pt="xl">{outputContent}</Box>
+      </Paper>
+      <Modal
+        opened={isFocused}
+        onClose={() => setIsFocused(false)}
+        size="90%"
+        title={`Focused Output for ${blockId}`}
+      >
+        <Box style={{ maxHeight: "80vh", overflowY: "auto" }}>
+          {outputContent}
+        </Box>
+      </Modal>
+    </>
   );
 }

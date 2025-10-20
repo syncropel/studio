@@ -1,3 +1,4 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/widgets/TopBar/index.tsx
 "use client";
 
 import {
@@ -13,8 +14,8 @@ import {
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { useSessionStore } from "@/shared/store/useSessionStore";
-import { useWebSocket } from "@/shared/providers/WebSocketProvider";
-import { nanoid } from "nanoid";
+import { useSettingsStore } from "@/shared/store/useSettingsStore";
+import { useUIStateStore } from "@/shared/store/useUIStateStore";
 import { useRouter } from "next/navigation";
 import {
   IconMenu2,
@@ -24,42 +25,41 @@ import {
 } from "@tabler/icons-react";
 
 export default function TopBar() {
+  const { currentPage, setCurrentPage, clearAllBlockResults } =
+    useSessionStore();
   const {
-    currentPage,
-    setCurrentPage,
     isNavigatorVisible,
     toggleNavigator,
     isInspectorVisible,
     toggleInspector,
     isTerminalVisible,
     toggleTerminal,
-    openSpotlight,
-    toggleNavDrawer,
-    pageParameters,
     viewMode,
     setViewMode,
-    showCodeBlocks,
-    toggleShowCodeBlocks,
-    showMarkdownBlocks,
-    toggleShowMarkdownBlocks,
-    setShowOutputsOnly,
-  } = useSessionStore();
+    showNarrative,
+    setShowNarrative,
+    showConfig,
+    setShowConfig,
+    showCode,
+    setShowCode,
+  } = useSettingsStore();
+  // Get the new action from the UI store
+  const { openSpotlight, toggleNavDrawer, setFoldingCommand } =
+    useUIStateStore();
 
-  const { sendJsonMessage } = useWebSocket();
   const isMobile = useMediaQuery("(max-width: 768px)");
   const router = useRouter();
 
   const handleSave = () => {
-    if (!currentPage) return; /* ... */
+    /* ... placeholder ... */
   };
   const handleRunAll = () => {
-    if (!currentPage?.id) return; /* ... */
+    /* ... placeholder ... */
   };
   const goToHome = () => {
     setCurrentPage(null);
     router.push("/");
   };
-  const isOutputsOnly = !showCodeBlocks && !showMarkdownBlocks;
 
   const DesktopMenus = () => (
     <Group gap="xs">
@@ -69,6 +69,7 @@ export default function TopBar() {
             File
           </Button>
         </Menu.Target>
+        {/* ... File menu content ... */}
         <Menu.Dropdown>
           <Menu.Item disabled>New Page...</Menu.Item>
           <Menu.Item
@@ -80,35 +81,6 @@ export default function TopBar() {
           </Menu.Item>
           <Menu.Divider />
           <Menu.Item disabled>Exit</Menu.Item>
-        </Menu.Dropdown>
-      </Menu>
-
-      <Menu shadow="md" width={200}>
-        <Menu.Target>
-          <Button variant="subtle" size="xs">
-            Panels
-          </Button>
-        </Menu.Target>
-        <Menu.Dropdown>
-          {/* --- DEFINITIVE FIX APPLIED TO ALL TOGGLES --- */}
-          <Menu.Item
-            onClick={() => toggleNavigator()}
-            rightSection={isNavigatorVisible ? "✓" : ""}
-          >
-            Navigator Sidebar
-          </Menu.Item>
-          <Menu.Item
-            onClick={() => toggleInspector()}
-            rightSection={isInspectorVisible ? "✓" : ""}
-          >
-            Inspector Panel
-          </Menu.Item>
-          <Menu.Item
-            onClick={() => toggleTerminal()}
-            rightSection={isTerminalVisible ? "✓" : ""}
-          >
-            Activity Hub
-          </Menu.Item>
         </Menu.Dropdown>
       </Menu>
 
@@ -139,24 +111,39 @@ export default function TopBar() {
             Graph View
           </Menu.Item>
           <Menu.Divider />
-          <Menu.Label>Content Visibility</Menu.Label>
+
+          <Menu.Label>Content Filters</Menu.Label>
           <Menu.Item
-            onClick={() => toggleShowMarkdownBlocks()}
-            rightSection={showMarkdownBlocks ? "✓" : ""}
+            onClick={() => setShowNarrative(!showNarrative)}
+            rightSection={showNarrative ? "✓" : ""}
           >
-            Show Markdown
+            Show Narrative
           </Menu.Item>
           <Menu.Item
-            onClick={() => toggleShowCodeBlocks()}
-            rightSection={showCodeBlocks ? "✓" : ""}
+            onClick={() => setShowConfig(!showConfig)}
+            rightSection={showConfig ? "✓" : ""}
           >
-            Show Code Blocks
+            Show Block Configuration
           </Menu.Item>
           <Menu.Item
-            onClick={() => setShowOutputsOnly(!isOutputsOnly)}
-            rightSection={isOutputsOnly ? "✓" : ""}
+            onClick={() => setShowCode(!showCode)}
+            rightSection={showCode ? "✓" : ""}
           >
-            Show Outputs Only
+            Show Block Code
+          </Menu.Item>
+          <Menu.Divider />
+
+          {/* --- DEFINITIVE FIX: WIRE UP FOLDING ACTIONS --- */}
+          <Menu.Label>Folding Actions</Menu.Label>
+          <Menu.Item onClick={() => setFoldingCommand("collapseAll")}>
+            Collapse All Blocks
+          </Menu.Item>
+          <Menu.Item onClick={() => setFoldingCommand("expandAll")}>
+            Expand All Blocks
+          </Menu.Item>
+          {/* TODO: Implement a more granular `collapseCode` that leaves metadata open */}
+          <Menu.Item onClick={() => setFoldingCommand("collapseAll")}>
+            Collapse All Code
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>
@@ -167,6 +154,7 @@ export default function TopBar() {
             Run
           </Button>
         </Menu.Target>
+        {/* ... Run menu content ... */}
         <Menu.Dropdown>
           <Menu.Item
             onClick={handleRunAll}
@@ -175,38 +163,47 @@ export default function TopBar() {
           >
             Run All Blocks
           </Menu.Item>
-          <Menu.Divider />
           <Menu.Item disabled>Stop Execution</Menu.Item>
-          <Menu.Item disabled>Clear All Outputs</Menu.Item>
+          <Menu.Divider />
+          <Menu.Item onClick={clearAllBlockResults} disabled={!currentPage}>
+            Clear All Outputs
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+
+      <Menu shadow="md" width={200}>
+        <Menu.Target>
+          <Button variant="subtle" size="xs">
+            Panels
+          </Button>
+        </Menu.Target>
+        {/* ... Panels menu content ... */}
+        <Menu.Dropdown>
+          <Menu.Item
+            onClick={() => toggleNavigator()}
+            rightSection={isNavigatorVisible ? "✓" : ""}
+          >
+            Navigator Sidebar
+          </Menu.Item>
+          <Menu.Item
+            onClick={() => toggleInspector()}
+            rightSection={isInspectorVisible ? "✓" : ""}
+          >
+            Inspector (Data Tray)
+          </Menu.Item>
+          <Menu.Item
+            onClick={() => toggleTerminal()}
+            rightSection={isTerminalVisible ? "✓" : ""}
+          >
+            Activity Hub
+          </Menu.Item>
         </Menu.Dropdown>
       </Menu>
     </Group>
   );
 
-  const MobileMenu = () => (
-    <Menu shadow="md" width={240}>
-      <Menu.Target>
-        <Tooltip label="Open menu">
-          <ActionIcon variant="subtle" color="gray">
-            <IconMenu2 size={18} />
-          </ActionIcon>
-        </Tooltip>
-      </Menu.Target>
-      <Menu.Dropdown>
-        <Menu.Label>File</Menu.Label>
-        <Menu.Item onClick={handleSave} disabled={!currentPage}>
-          Save
-        </Menu.Item>
-        <Menu.Divider />
-        <Menu.Label>Panels</Menu.Label>
-        {/* These toggles are for the mobile drawers and are also correctly wrapped */}
-        <Menu.Item onClick={() => toggleNavDrawer()}>
-          Toggle Navigator
-        </Menu.Item>
-      </Menu.Dropdown>
-    </Menu>
-  );
-
+  // The rest of the component (main return statement) is unchanged.
+  // ... copy the rest of the component from the previous correct version ...
   return (
     <Box
       component="header"
@@ -214,6 +211,7 @@ export default function TopBar() {
       py="xs"
       className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 flex-shrink-0 gap-4"
     >
+      {/* Left Section: Navigation and Menus */}
       <Group gap="xs" align="center">
         {isMobile ? (
           <>
@@ -255,7 +253,8 @@ export default function TopBar() {
         )}
       </Group>
 
-      {!isMobile && currentPage && (
+      {/* Center Section: Universal Search */}
+      {!isMobile && (
         <Group justify="center" style={{ flex: 1 }}>
           <UnstyledButton
             onClick={openSpotlight}
@@ -272,6 +271,7 @@ export default function TopBar() {
         </Group>
       )}
 
+      {/* Right Section: Page Context and Mobile Actions */}
       <Group
         gap="xs"
         justify="flex-end"
@@ -279,7 +279,7 @@ export default function TopBar() {
       >
         {currentPage && (
           <Text size="xs" c="dimmed" truncate>
-            {isMobile ? currentPage.name : currentPage.id || currentPage.name}
+            {currentPage.name}
           </Text>
         )}
         {isMobile && currentPage && (
@@ -296,6 +296,10 @@ export default function TopBar() {
               <Menu.Dropdown>
                 <Menu.Item onClick={handleRunAll}>Run All Blocks</Menu.Item>
                 <Menu.Item onClick={handleSave}>Save</Menu.Item>
+                <Menu.Divider />
+                <Menu.Item onClick={clearAllBlockResults} color="red">
+                  Clear All Outputs
+                </Menu.Item>
               </Menu.Dropdown>
             </Menu>
           </Group>

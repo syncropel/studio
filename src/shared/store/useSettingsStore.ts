@@ -5,23 +5,32 @@ export type ViewMode = "document" | "grid" | "graph";
 
 interface SettingsStore {
   // --- STATE ---
-  // Visibility of the main desktop panels. Persisted so the user's layout is saved.
+  // Main layout panel visibility
   isNavigatorVisible: boolean;
   isInspectorVisible: boolean;
   isTerminalVisible: boolean;
 
-  // Notebook-specific view preferences
+  // Notebook perspective
   viewMode: ViewMode;
+
+  // New Content Filters for Document View
+  showNarrative: boolean;
+  showConfig: boolean;
+  showCode: boolean;
 
   // --- ACTIONS ---
   toggleNavigator: (open?: boolean) => void;
   toggleInspector: (open?: boolean) => void;
   toggleTerminal: (open?: boolean) => void;
   setViewMode: (mode: ViewMode) => void;
+
+  // New actions for Content Filters
+  setShowNarrative: (show: boolean) => void;
+  setShowConfig: (show: boolean) => void;
+  setShowCode: (show: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsStore>()(
-  // The `persist` middleware automatically saves state to localStorage.
   persist(
     (set) => ({
       // Default initial state
@@ -29,8 +38,11 @@ export const useSettingsStore = create<SettingsStore>()(
       isInspectorVisible: false,
       isTerminalVisible: false,
       viewMode: "document",
+      showNarrative: true,
+      showConfig: true,
+      showCode: true,
 
-      // Actions to update the state
+      // Actions
       toggleNavigator: (open) =>
         set((state) => ({
           isNavigatorVisible:
@@ -47,9 +59,14 @@ export const useSettingsStore = create<SettingsStore>()(
             open === undefined ? !state.isTerminalVisible : open,
         })),
       setViewMode: (mode) => set({ viewMode: mode }),
+
+      // New filter actions
+      setShowNarrative: (show) => set({ showNarrative: show }),
+      setShowConfig: (show) => set({ showConfig: show }),
+      setShowCode: (show) => set({ showCode: show }),
     }),
     {
-      name: "syncropel-studio-settings-storage", // Unique name for localStorage key
+      name: "syncropel-studio-settings-storage",
     }
   )
 );
