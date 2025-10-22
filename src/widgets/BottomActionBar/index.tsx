@@ -1,3 +1,4 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/widgets/BottomActionBar/index.tsx
 "use client";
 
 import { ActionIcon, Box, Button, Group, Tooltip } from "@mantine/core";
@@ -8,18 +9,24 @@ import {
   IconAdjustments,
 } from "@tabler/icons-react";
 import { useSessionStore } from "@/shared/store/useSessionStore";
+import { useUIStateStore } from "@/shared/store/useUIStateStore";
+import ActivityHubWidget from "../ActivityHubWidget";
 
 export default function BottomActionBar() {
-  const {
-    currentPage,
-    openSpotlight,
-    toggleTerminal, // This will toggle the Activity Hub bottom sheet
-    toggleInspectorDrawer,
-  } = useSessionStore();
+  const { currentPage } = useSessionStore();
+  const { openSpotlight, toggleInspectorDrawer, openModal, triggerRunAll } =
+    useUIStateStore();
 
   const handleRunAll = () => {
-    // This is a placeholder for now. We will wire it up with the WebSocket later.
-    console.log("TODO: Implement Run All from BottomActionBar");
+    triggerRunAll();
+  };
+
+  const handleOpenActivityHub = () => {
+    openModal({
+      title: "Activity Hub",
+      content: <ActivityHubWidget />,
+      size: "95%",
+    });
   };
 
   return (
@@ -53,7 +60,7 @@ export default function BottomActionBar() {
             </Tooltip>
             <Tooltip label="Activity Hub">
               <ActionIcon
-                onClick={() => toggleTerminal()}
+                onClick={handleOpenActivityHub}
                 size="xl"
                 variant="subtle"
                 color="gray"
@@ -63,7 +70,7 @@ export default function BottomActionBar() {
             </Tooltip>
             <Tooltip label="Inspector">
               <ActionIcon
-                onClick={() => toggleInspectorDrawer()}
+                onClick={() => toggleInspectorDrawer(true)}
                 size="xl"
                 variant="subtle"
                 color="gray"

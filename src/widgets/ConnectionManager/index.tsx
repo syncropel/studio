@@ -1,9 +1,9 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/widgets/ConnectionManager/index.tsx
 "use client";
 
 import { useState } from "react";
 import {
   Box,
-  Title,
   Button,
   Stack,
   Group,
@@ -11,12 +11,12 @@ import {
   TextInput,
   ActionIcon,
   Tooltip,
+  Paper,
+  UnstyledButton,
 } from "@mantine/core";
-import {
-  useConnectionStore,
-  ConnectionProfile,
-} from "@/shared/store/useConnectionStore";
+import { useConnectionStore } from "@/shared/store/useConnectionStore";
 import { IconCheck, IconTrash, IconPlus, IconPlugX } from "@tabler/icons-react";
+import { useUIStateStore } from "@/shared/store/useUIStateStore";
 
 export default function ConnectionManager() {
   const {
@@ -27,137 +27,140 @@ export default function ConnectionManager() {
     setActiveProfileId,
     disconnect,
   } = useConnectionStore();
+  const { toggleConnectionManager } = useUIStateStore();
   const [isAdding, setIsAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
 
   const handleSave = () => {
     if (newName.trim() && newUrl.trim().match(/^(ws|wss):\/\//)) {
-      const newProfile: ConnectionProfile = {
-        name: newName,
-        url: newUrl,
-        id: `remote-${Date.now()}`,
-      };
       addProfile({ name: newName, url: newUrl });
-      setIsAdding(false);
-      setNewName("");
-      setNewUrl("");
-      // Automatically connect to the new profile
-      setActiveProfileId(newProfile.id);
+      toggleConnectionManager(false);
     } else {
       alert(
-        "Please provide a valid name and URL (starting with ws:// or wss://)."
+        "Please provide a valid name and a URL starting with ws:// or wss://"
       );
     }
   };
 
   if (isAdding) {
     return (
-      <Box>
-        <Title order={3} mb="lg">
-          Add New Server
-        </Title>
-        <Stack>
-          <TextInput
-            label="Friendly Name"
-            placeholder="Staging Environment"
-            value={newName}
-            onChange={(e) => setNewName(e.currentTarget.value)}
-          />
-          <TextInput
-            label="Server URL"
-            placeholder="wss://cx.staging.mycompany.com"
-            value={newUrl}
-            onChange={(e) => setNewUrl(e.currentTarget.value)}
-          />
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setIsAdding(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave}>Save & Connect</Button>
-          </Group>
-        </Stack>
-      </Box>
+      <Stack>
+        <TextInput
+          label="Friendly Name"
+          placeholder="Staging Environment"
+          value={newName}
+          onChange={(e) => setNewName(e.currentTarget.value)}
+          required
+          autoFocus
+        />
+        <TextInput
+          label="Server URL"
+          placeholder="wss://cx.staging.mycompany.com"
+          value={newUrl}
+          onChange={(e) => setNewUrl(e.currentTarget.value)}
+          required
+        />
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setIsAdding(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave}>Save & Connect</Button>
+        </Group>
+      </Stack>
     );
   }
 
   return (
-    <Box>
-      <Title order={3} mb="lg">
-        Connect to a Syncropel Server
-      </Title>
-      <Stack gap="xs">
-        <Button
-          leftSection={<IconPlus size={16} />}
-          variant="default"
-          onClick={() => setIsAdding(true)}
-        >
-          Add New Remote Server...
-        </Button>
-        <Text size="sm" c="dimmed" mt="md" mb="xs">
-          Available Servers
-        </Text>
-        {profiles.map((profile) => {
-          const isActive = activeProfileId === profile.id;
-          return (
-            <Box
-              key={profile.id}
-              className="w-full p-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50"
-            >
-              <Group justify="space-between">
-                <Group gap="sm">
-                  {isActive ? (
-                    <IconCheck size={20} className="text-green-500" />
-                  ) : (
-                    <Box w={20} />
-                  )}
-                  <Box>
-                    <Text fw={500}>{profile.name}</Text>
-                    <Text size="xs" c="dimmed">
-                      {profile.isDefault ? "Local bundled server" : profile.url}
-                    </Text>
-                  </Box>
-                </Group>
-                <Group>
-                  {isActive ? (
-                    <Button
-                      leftSection={<IconPlugX size={14} />}
-                      variant="default"
-                      size="xs"
-                      onClick={disconnect}
-                    >
-                      Disconnect
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="light"
-                      size="xs"
-                      onClick={() => setActiveProfileId(profile.id)}
-                    >
-                      Connect
-                    </Button>
-                  )}
-
-                  {!profile.isDefault && (
-                    <Tooltip label="Remove Server">
-                      <ActionIcon
-                        variant="subtle"
-                        color="red"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeProfile(profile.id);
-                        }}
-                      >
-                        <IconTrash size={16} />
-                      </ActionIcon>
-                    </Tooltip>
-                  )}
-                </Group>
+    <Stack gap="sm">
+      {profiles.map((profile) => {
+        const isActive = activeProfileId === profile.id;
+        return (
+          <Paper
+            key={profile.id}
+            p="sm"
+            withBorder
+            radius="md"
+            className="w-full"
+          >
+            <Group justify="space-between" wrap="nowrap">
+              <Group gap="sm" wrap="nowrap">
+                {isActive ? (
+                  <IconCheck
+                    size={20}
+                    className="text-green-500 flex-shrink-0"
+                  />
+                ) : (
+                  <Box w={20} className="flex-shrink-0" />
+                )}
+                <Box style={{ minWidth: 0 }}>
+                  <Text fw={500} truncate>
+                    {profile.name}
+                  </Text>
+                  <Text size="xs" c="dimmed" truncate>
+                    {isActive
+                      ? "Connected"
+                      : profile.description || profile.url}
+                  </Text>
+                </Box>
               </Group>
-            </Box>
-          );
-        })}
-      </Stack>
-    </Box>
+              <Group gap="xs" wrap="nowrap" className="flex-shrink-0">
+                {isActive ? (
+                  <Button
+                    leftSection={<IconPlugX size={14} />}
+                    variant="default"
+                    size="xs"
+                    onClick={() => {
+                      disconnect();
+                      toggleConnectionManager(false);
+                    }}
+                  >
+                    Disconnect
+                  </Button>
+                ) : (
+                  <Button
+                    variant="light"
+                    size="xs"
+                    onClick={() => {
+                      setActiveProfileId(profile.id);
+                      toggleConnectionManager(false);
+                    }}
+                  >
+                    Connect
+                  </Button>
+                )}
+
+                {!profile.isDefault && (
+                  <Tooltip label="Remove Server">
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeProfile(profile.id);
+                      }}
+                    >
+                      <IconTrash size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+              </Group>
+            </Group>
+          </Paper>
+        );
+      })}
+
+      <UnstyledButton
+        onClick={() => setIsAdding(true)}
+        className="w-full p-3 mt-xs rounded-md border border-dashed border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+      >
+        <Group justify="center" gap="xs">
+          <IconPlus size={16} />
+          <Text fw={500} size="sm">
+            Add Server...
+          </Text>
+        </Group>
+      </UnstyledButton>
+    </Stack>
   );
 }

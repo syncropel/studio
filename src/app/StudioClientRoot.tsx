@@ -1,6 +1,7 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/app/StudioClientRoot.tsx
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Loader,
@@ -18,50 +19,37 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { ReadyState } from "react-use-websocket";
 import { nanoid } from "nanoid";
 
-// --- HOOKS & STORES ---
-// Custom hook to ensure client-side rendering
 import { useIsClient } from "@/shared/hooks/useIsClient";
-// Sliced Zustand stores for clean state management
 import { useSessionStore } from "@/shared/store/useSessionStore";
 import { useSettingsStore } from "@/shared/store/useSettingsStore";
 import { useUIStateStore } from "@/shared/store/useUIStateStore";
 import { useConnectionStore } from "@/shared/store/useConnectionStore";
-// WebSocket provider for server communication
 import { useWebSocket } from "@/shared/providers/WebSocketProvider";
-
-// Type definitions
 import type { HomepageItem } from "@/widgets/Spotlight";
 
-// --- WIDGET IMPORTS ---
 import TopBar from "@/widgets/TopBar";
 import SidebarWidget from "@/widgets/SidebarWidget";
 import Notebook from "@/widgets/Notebook";
 import InspectorWidget from "@/widgets/InspectorWidget";
 import ActivityHubWidget from "@/widgets/ActivityHubWidget";
-import Homepage from "@/widgets/Homepage";
 import Spotlight from "@/widgets/Spotlight";
 import BottomActionBar from "@/widgets/BottomActionBar";
 import ConnectionManager from "@/widgets/ConnectionManager";
-import WelcomeScreen from "@/widgets/WelcomeScreen";
-import FoldingTest from "@/mocks/components/FoldingTest";
-import FoldingTestBed from "@/mocks/components/FoldingTestBed";
-import FoldingTestActionRegions from "@/mocks/components/FoldingTestActionRegions";
+import SessionRecoveryModal from "@/widgets/SessionRecoveryModal";
+import ConnectionStatusIndicator from "@/widgets/ConnectionStatusIndicator";
 
 export default function StudioClientRoot() {
-  // --- CORE HOOKS ---
   const router = useRouter();
   const searchParams = useSearchParams();
   const isClient = useIsClient();
   const isMobile = useMediaQuery("(max-width: 768px)");
   const initialLoadHandled = useRef(false);
 
-  // --- STATE MANAGEMENT ---
-  // Read state and actions from our new, sliced Zustand stores.
-  // This makes dependencies explicit and improves performance.
-  const { currentPage } = useSessionStore();
+  const [showRecovery, setShowRecovery] = useState(false);
+
+  const { currentPage, reset: resetSession } = useSessionStore();
   const { getActiveProfile } = useConnectionStore();
-  const { isNavigatorVisible, isInspectorVisible, isTerminalVisible } =
-    useSettingsStore();
+  const { isInspectorVisible, isTerminalVisible } = useSettingsStore();
   const {
     isSpotlightVisible,
     isConnectionManagerOpen,
@@ -72,12 +60,30 @@ export default function StudioClientRoot() {
     toggleConnectionManager,
     toggleNavDrawer,
     toggleInspectorDrawer,
+    modalState,
+    closeModal,
   } = useUIStateStore();
 
-  const { sendJsonMessage, readyState } = useWebSocket();
+  const { sendJsonMessage, readyState, isReconnecting } = useWebSocket();
   const activeProfile = getActiveProfile();
+  const isConnected = readyState === ReadyState.OPEN;
 
-  // --- HOTKEYS & SIDE EFFECTS ---
+  useEffect(() => {
+    if (isClient) {
+      const persistedState = useSessionStore.getState();
+      if (persistedState.isDirty && persistedState.currentPage) {
+        setShowRecovery(true);
+      }
+    }
+  }, [isClient]);
+
+  const handleRestore = () => setShowRecovery(false);
+  const handleDiscard = () => {
+    resetSession();
+    setShowRecovery(false);
+    window.location.reload();
+  };
+
   useHotkeys([
     [
       "mod+K",
@@ -88,13 +94,9 @@ export default function StudioClientRoot() {
     ],
   ]);
 
-  // Effect for handling initial page load from URL query parameter
   useEffect(() => {
-    if (
-      isClient &&
-      readyState === ReadyState.OPEN &&
-      !initialLoadHandled.current
-    ) {
+    if (isClient && isConnected && !initialLoadHandled.current) {
+      if (showRecovery) return;
       const pageIdFromUrl = searchParams.get("page");
       if (pageIdFromUrl && pageIdFromUrl !== "undefined") {
         sendJsonMessage({
@@ -105,30 +107,21 @@ export default function StudioClientRoot() {
       }
       initialLoadHandled.current = true;
     }
-  }, [isClient, readyState, searchParams, sendJsonMessage]);
+  }, [isClient, isConnected, searchParams, sendJsonMessage, showRecovery]);
 
-  // Effect for keeping the browser URL in sync with the current page state
   useEffect(() => {
     if (!isClient) return;
-
     const pageInUrl = searchParams.get("page");
     const pageIdInState = currentPage?.id;
-
-    // Condition 1: We have a page in our state, and the URL is out of sync.
-    // This includes the case where the URL has `page=undefined` or is just `/`.
     if (pageIdInState && pageIdInState !== pageInUrl) {
       router.push(`/?page=${pageIdInState}`, { scroll: false });
-    }
-    // Condition 2: We have no page in our state, but the URL still thinks we do.
-    // This handles the case where the user navigates "home".
-    else if (!pageIdInState && pageInUrl) {
+    } else if (!pageIdInState && pageInUrl) {
       router.push(`/`, { scroll: false });
     }
-  }, [currentPage, searchParams, router, isClient]); // Dependencies are correct
+  }, [currentPage, searchParams, router, isClient]);
 
-  // --- EVENT HANDLERS ---
   const handleSpotlightItemClick = (item: HomepageItem) => {
-    closeSpotlight(); // Close the modal immediately
+    closeSpotlight();
     if (item.action.type === "open_page") {
       sendJsonMessage({
         type: "PAGE.LOAD",
@@ -138,9 +131,84 @@ export default function StudioClientRoot() {
     }
   };
 
-  // --- RENDER LOGIC ---
+  const renderMainContent = () => {
+    // If no profile is active, we are in the welcome state.
+    if (!activeProfile) {
+      return (
+        <Center h="100%" className="p-4">
+          <Stack align="center" gap="xl">
+            <Stack align="center" gap="xs">
+              <Title order={2}>Welcome to Syncropel Studio</Title>
+              <Text c="dimmed">Connect to a server to get started.</Text>
+            </Stack>
+            <Button size="md" onClick={() => toggleConnectionManager(true)}>
+              Manage Connections
+            </Button>
+          </Stack>
+        </Center>
+      );
+    }
 
-  // Server-side rendering fallback
+    // If a profile is active, we use the readyState to determine the UI.
+    switch (readyState) {
+      case ReadyState.CONNECTING:
+        return (
+          <Center h="100%">
+            <Stack align="center" gap="lg">
+              <Loader />
+              <ConnectionStatusIndicator
+                readyState={readyState}
+                isReconnecting={isReconnecting}
+                activeProfileName={activeProfile.name}
+              />
+              {isReconnecting && (
+                <Button
+                  variant="default"
+                  onClick={() => toggleConnectionManager(true)}
+                >
+                  Manage Connections
+                </Button>
+              )}
+            </Stack>
+          </Center>
+        );
+      case ReadyState.OPEN:
+        return <Notebook />;
+      case ReadyState.CLOSED:
+        return (
+          <Center h="100%" className="p-4">
+            <Stack align="center" gap="lg">
+              <Title order={2} c="red">
+                ❌ Connection Failed
+              </Title>
+              <Text c="dimmed" ta="center">
+                Could not connect to{" "}
+                <Text span fw={700}>
+                  '{activeProfile.name}'
+                </Text>
+                . <br />
+                The server may be offline or the URL may be incorrect.
+              </Text>
+              <Button
+                variant="default"
+                size="md"
+                onClick={() => toggleConnectionManager(true)}
+              >
+                Review Connection Settings
+              </Button>
+            </Stack>
+          </Center>
+        );
+      default:
+        // Fallback for CLOSING, UNINSTANTIATED states
+        return (
+          <Center h="100%">
+            <Loader />
+          </Center>
+        );
+    }
+  };
+
   if (!isClient) {
     return (
       <Center h="100vh">
@@ -149,65 +217,18 @@ export default function StudioClientRoot() {
     );
   }
 
-  // Main content switcher based on connection and page state
-  // --- Main content switcher based on connection and page state ---
-  const renderMainContent = () => {
-    if (!activeProfile) {
-      // We still need a screen to prompt the user to connect if no profile is active.
-      // This can be a very simple component or the old WelcomeScreen.
-      // For now, a simple button is clean and effective.
-      return (
-        <Center h="100%" className="p-4">
-          <Stack align="center">
-            <Title order={2}>Welcome to Syncropel Studio</Title>
-            <Text c="dimmed">Connect to a server to get started.</Text>
-            <Button mt="md" onClick={() => toggleConnectionManager(true)}>
-              Manage Connections
-            </Button>
-          </Stack>
-        </Center>
-      );
-    }
-
-    if (readyState === ReadyState.CONNECTING) {
-      return (
-        <Center h="100%">
-          <Loader />
-          <Text ml="sm">Connecting to {activeProfile.name}...</Text>
-        </Center>
-      );
-    }
-
-    if (readyState === ReadyState.OPEN) {
-      // --- THIS IS THE KEY CHANGE ---
-      // We ALWAYS render the Notebook component once connected.
-      // The Notebook component itself is now responsible for showing either
-      // the welcome/prompt view (if currentPage is null) or the full editor.
-      return <Notebook />;
-    }
-
-    // Default to a disconnected/error state
-    return (
-      <Center h="100%" className="p-4">
-        <Text c="red" ta="center">
-          Connection to{" "}
-          <Text span fw={700}>
-            {activeProfile.name}
-          </Text>{" "}
-          failed. Please check the server or your connection settings.
-        </Text>
-      </Center>
-    );
-  };
-
-  const isConnected = readyState === ReadyState.OPEN;
-
-  // --- MAIN COMPONENT JSX ---
   return (
     <main className="relative h-screen w-screen flex flex-col bg-white dark:bg-gray-950 text-black dark:text-white overflow-hidden">
-      {/* <FoldingTestActionRegions /> */}
-      {/* <FoldingTest /> */}
-      {/* --- MODALS & DRAWERS (Global Overlays) --- */}
+      <SessionRecoveryModal
+        isOpen={showRecovery}
+        onClose={handleDiscard}
+        onRestore={handleRestore}
+        onDiscard={handleDiscard}
+        pageName={
+          useSessionStore.getState().currentPage?.name ||
+          "your previous session"
+        }
+      />
       <Modal
         opened={isSpotlightVisible}
         onClose={closeSpotlight}
@@ -223,7 +244,6 @@ export default function StudioClientRoot() {
           <Spotlight onItemClick={handleSpotlightItemClick} />
         </Box>
       </Modal>
-
       <Modal
         opened={isConnectionManagerOpen}
         onClose={() => toggleConnectionManager(false)}
@@ -232,6 +252,15 @@ export default function StudioClientRoot() {
         centered
       >
         <ConnectionManager />
+      </Modal>
+      <Modal
+        opened={!!modalState}
+        onClose={closeModal}
+        title={modalState?.title}
+        size={modalState?.size || "lg"}
+        centered
+      >
+        {modalState?.content}
       </Modal>
 
       {isMobile && (
@@ -245,7 +274,6 @@ export default function StudioClientRoot() {
           >
             <SidebarWidget
               onConnectionClick={() => toggleConnectionManager(true)}
-              disabled={!isConnected}
             />
           </Drawer>
           <Drawer
@@ -261,7 +289,6 @@ export default function StudioClientRoot() {
         </>
       )}
 
-      {/* --- MAIN LAYOUT --- */}
       <TopBar />
 
       <div
@@ -271,12 +298,11 @@ export default function StudioClientRoot() {
         <PanelGroup direction="vertical">
           <Panel>
             <PanelGroup direction="horizontal">
-              {!isMobile && isNavigatorVisible && (
+              {!isMobile && isConnected && (
                 <>
                   <Panel defaultSize={20} minSize={15} maxSize={40}>
                     <SidebarWidget
                       onConnectionClick={() => toggleConnectionManager(true)}
-                      disabled={!isConnected}
                     />
                   </Panel>
                   <PanelResizeHandle className="w-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 transition-colors" />

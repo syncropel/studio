@@ -1,3 +1,4 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/shared/providers/WebSocketProvider.tsx
 "use client";
 
 import React, {
@@ -6,11 +7,11 @@ import React, {
   ReactNode,
   useCallback,
   useEffect,
+  useRef,
 } from "react";
 import useReactWebSocket, { ReadyState } from "react-use-websocket";
 import { notifications } from "@mantine/notifications";
 
-// Import the specific stores and types we will interact with
 import { useConnectionStore } from "@/shared/store/useConnectionStore";
 import { useSessionStore } from "@/shared/store/useSessionStore";
 import {
@@ -18,23 +19,23 @@ import {
   SessionLoadedFields,
   HomepageDataResultFields,
   WorkspaceBrowseResultFields,
+  PageLoadedFields,
+  PageSavedFields,
+  PageStatusFields,
 } from "../api/types";
-import { ContextualPage } from "../types/notebook";
 
-// Helper for logging connection state (unchanged)
-const readyStateToString = (readyState: ReadyState): string => {
-  return (
-    {
-      [ReadyState.CONNECTING]: "Connecting",
-      [ReadyState.OPEN]: "Open",
-      [ReadyState.CLOSING]: "Closing",
-      [ReadyState.CLOSED]: "Closed",
-      [ReadyState.UNINSTANTIATED]: "Uninstantiated",
-    }[readyState] || "Unknown"
-  );
-};
+const log = (message: string, ...args: any[]) =>
+  console.log(`[WebSocketProvider] ${message}`, ...args);
 
-// Type definitions (unchanged)
+const readyStateToString = (readyState: ReadyState): string =>
+  ({
+    [ReadyState.CONNECTING]: "Connecting",
+    [ReadyState.OPEN]: "Open",
+    [ReadyState.CLOSING]: "Closing",
+    [ReadyState.CLOSED]: "Closed",
+    [ReadyState.UNINSTANTIATED]: "Uninstantiated",
+  }[readyState] || "Unknown");
+
 type OutboundMessage = {
   type: string;
   command_id: string;
@@ -44,41 +45,39 @@ type OutboundMessage = {
 interface WebSocketContextType {
   sendJsonMessage: (jsonMessage: OutboundMessage) => void;
   readyState: ReadyState;
+  isReconnecting: boolean;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
+
+const MAX_RECONNECT_ATTEMPTS = 3;
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
   const activeProfile = useConnectionStore((state) => state.getActiveProfile());
   const socketUrl = activeProfile?.url ?? null;
 
-  // Get all necessary state update actions from our sliced stores.
-  // This is the core of the new pattern.
-  const {
-    setLastJsonMessage,
-    setBlockResult,
-    setCurrentPage,
-    setConnections,
-    setVariables,
-    handleWorkspaceBrowseResult,
-    setHomepageData,
-  } = useSessionStore.getState(); // Use .getState() for use outside of React components
+  const hasAttemptedConnection = useRef(false);
+
+  // CHANGED: Get these functions fresh each time by accessing the store directly in the handler
+  // instead of extracting them once at the component level
+  log(`Provider rendered. Active profile:`, activeProfile);
+  log(`Attempting to connect to URL: ${socketUrl}`);
 
   const { sendJsonMessage: sendBaseMessage, readyState } =
     useReactWebSocket<InboundMessage>(socketUrl, {
       onOpen: () => {
-        const profileName = activeProfile?.name || "server";
-        console.log(`[WS] Connection established to ${profileName}.`);
-        notifications.hide("ws-conn-error");
+        log("✅ onOpen: Connection established.");
+        hasAttemptedConnection.current = true;
+        notifications.hide("ws-reconnect-error");
         notifications.show({
           id: "ws-conn-success",
           title: "Connected",
-          message: `Successfully connected to ${profileName}.`,
+          message: `Successfully connected to ${
+            activeProfile?.name || "server"
+          }.`,
           color: "green",
           autoClose: 3000,
         });
-
-        // On successful connection, immediately initialize the session
         sendBaseMessage({
           type: "SESSION.INIT",
           command_id: `session-init-${Date.now()}`,
@@ -86,14 +85,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         });
       },
       onClose: (event) => {
-        const profileName = activeProfile?.name || "server";
-        console.warn(
-          `[WS] Connection to ${profileName} closed. Clean: ${event.wasClean}, Code: ${event.code}`
-        );
-        if (activeProfile) {
+        log(`❌ onClose: Connection closed. Was clean: ${event.wasClean}`);
+        if (activeProfile && !event.wasClean) {
+          hasAttemptedConnection.current = true;
           notifications.show({
-            id: "ws-conn-error",
-            title: `Connection to ${profileName} Lost`,
+            id: "ws-reconnect-error",
+            title: `Connection to ${activeProfile.name} Lost`,
             message: "Attempting to reconnect...",
             color: "red",
             loading: true,
@@ -102,53 +99,105 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           });
         }
       },
-      onError: (event) => {
-        console.error("[WS] WebSocket error observed:", event);
+      onReconnectStop: () => {
+        log(
+          `🛑 onReconnectStop: All ${MAX_RECONNECT_ATTEMPTS} reconnect attempts failed.`
+        );
+        notifications.update({
+          id: "ws-reconnect-error",
+          title: "Connection Failed",
+          message: "Could not reconnect to the server.",
+          loading: false,
+          color: "red",
+        });
       },
-
-      // ========================================================================
-      //   THE NEW, CENTRALIZED `onMessage` DISPATCHER
-      // ========================================================================
+      onError: (event) => {
+        log("🔥 onError: WebSocket error observed.", event);
+      },
       onMessage: (event) => {
         try {
           const message: InboundMessage = JSON.parse(event.data);
-          setLastJsonMessage(message);
 
+          // CHANGED: Get store functions fresh each time
+          const {
+            setLastJsonMessage,
+            setBlockResult,
+            setCurrentPage,
+            setConnections,
+            setVariables,
+            handleWorkspaceBrowseResult,
+            setHomepageData,
+            setSavedPage,
+            setPageRunStatus,
+          } = useSessionStore.getState();
+
+          setLastJsonMessage(message);
           const { type, payload } = message;
           const fields = payload.fields;
+
+          // CHANGED: Added logging for all message types
+          log(`📨 Received message type: ${type}`, fields);
 
           switch (type) {
             case "BLOCK.STATUS":
             case "BLOCK.OUTPUT":
             case "BLOCK.ERROR":
               if (fields?.block_id) {
+                log(`Setting block result for: ${fields.block_id}`, fields);
                 setBlockResult(fields.block_id, fields as any);
               }
               break;
-
             case "PAGE.LOADED":
-              console.log("[DEBUG] Received PAGE.LOADED. Fields:", fields);
+              log(`📄 PAGE.LOADED received`, fields);
               if (fields) {
-                // --- DEFINITIVE FIX ---
-                // The `fields` object now contains `initial_model` which is our ContextualPage
-                const pageModel = fields.initial_model as
-                  | ContextualPage
-                  | undefined;
-                if (pageModel) {
-                  setCurrentPage(pageModel);
-                } else {
-                  console.error(
-                    "Received PAGE.LOADED but initial_model was missing in fields:",
-                    fields
+                const { initial_model, content } = fields as PageLoadedFields;
+                log(`initial_model exists: ${!!initial_model}`);
+                log(`content exists: ${!!content}`);
+                if (initial_model) {
+                  log(
+                    `🎯 Setting currentPage with initial_model:`,
+                    initial_model
                   );
+                  setCurrentPage(initial_model);
+                  // CHANGED: Log the state immediately after setting
+                  setTimeout(() => {
+                    const currentState = useSessionStore.getState().currentPage;
+                    log(`✅ currentPage in store after set:`, currentState);
+                  }, 0);
+                } else {
+                  log(`⚠️ No initial_model in PAGE.LOADED message`);
+                }
+              } else {
+                log(`⚠️ No fields in PAGE.LOADED message`);
+              }
+              break;
+            case "PAGE.SAVED":
+              if (fields) {
+                const { uri, name } = fields as PageSavedFields;
+                setSavedPage(uri, name);
+                notifications.show({
+                  title: "Saved",
+                  message: `Notebook '${name}' saved successfully.`,
+                  color: "green",
+                  autoClose: 2000,
+                });
+              }
+              break;
+            case "PAGE.STATUS":
+              if (fields) {
+                const status = fields as PageStatusFields;
+                if (
+                  status.status === "completed" ||
+                  status.status === "failed"
+                ) {
+                  setPageRunStatus(null);
+                } else {
+                  setPageRunStatus(status);
                 }
               }
               break;
             case "SESSION.LOADED":
               if (fields) {
-                // --- THIS IS THE FIX ---
-                // The `fields` object IS the session state.
-
                 const { new_session_state } = fields as SessionLoadedFields;
                 if (new_session_state) {
                   setConnections(new_session_state.connections);
@@ -156,20 +205,21 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
                 }
               }
               break;
-
             case "WORKSPACE.BROWSE_RESULT":
               if (fields) {
-                handleWorkspaceBrowseResult(fields as any);
+                handleWorkspaceBrowseResult(
+                  fields as WorkspaceBrowseResultFields
+                );
               }
               break;
-
-            // --- FIX 2: Correct Naming Convention ---
             case "HOMEPAGE.DATA_RESULT":
               if (fields) {
                 setHomepageData(fields as HomepageDataResultFields);
               }
               break;
-
+            case "RUN_HISTORY_RESULT":
+            case "RUN_DETAIL_RESULT":
+              break;
             case "SYSTEM.ERROR":
               notifications.show({
                 title: "Server Error",
@@ -177,50 +227,41 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
                 color: "red",
               });
               break;
-
             default:
-              console.log(
-                `[WS] Received unhandled/log-only event type: ${type}`
-              );
+              log(`⚠️ Unknown message type: ${type}`);
           }
         } catch (e) {
           console.error(
-            "[WS] Fatal error parsing message:",
+            "[WS] Error parsing message:",
             e,
             "Raw data:",
             event.data
           );
         }
       },
-
       shouldReconnect: () => !!activeProfile,
       reconnectInterval: 3000,
-      reconnectAttempts: 10,
+      reconnectAttempts: MAX_RECONNECT_ATTEMPTS,
       retryOnError: true,
       share: true,
       filter: () => socketUrl !== null,
     });
 
-  useEffect(() => {
-    console.log(
-      `[WS] Connection state changed to: ${readyStateToString(
-        readyState
-      )} for URL: ${socketUrl}`
-    );
-  }, [readyState, socketUrl]);
+  const isReconnecting =
+    hasAttemptedConnection.current && readyState === ReadyState.CONNECTING;
 
   const sendMessage = useCallback(
     (message: OutboundMessage) => {
-      console.log("[WS] Sending:", message);
       if (readyState === ReadyState.OPEN) {
+        log(`📤 Sending message:`, message);
         sendBaseMessage(message);
       } else {
-        console.error(
-          "[WS] Attempted to send message while connection was not open."
+        log(
+          `❌ Cannot send message - not connected. ReadyState: ${readyState}`
         );
         notifications.show({
           title: "Connection Error",
-          message: "Cannot send command: Not connected to the server.",
+          message: "Not connected to the server.",
           color: "red",
         });
       }
@@ -231,6 +272,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const contextValue: WebSocketContextType = {
     sendJsonMessage: sendMessage,
     readyState,
+    isReconnecting,
   };
 
   return (
@@ -242,8 +284,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
 export function useWebSocket() {
   const context = useContext(WebSocketContext);
-  if (!context) {
+  if (!context)
     throw new Error("useWebSocket must be used within a WebSocketProvider");
-  }
   return context;
 }

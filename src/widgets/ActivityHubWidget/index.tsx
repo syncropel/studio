@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Tabs, Box, Text, Group } from "@mantine/core";
+import { Tabs, Box, Text, Group, ActionIcon, Tooltip } from "@mantine/core";
 import {
   IconHistory,
   IconTerminal2,
-  IconActivity,
   IconFileText,
+  IconX,
 } from "@tabler/icons-react";
 import EventsTab from "./EventsTab";
 import TerminalTab from "./TerminalTab";
@@ -14,7 +14,7 @@ import RunsTab from "./RunsTab";
 import RunInspectorTab from "./RunInspectorTab";
 
 export default function ActivityHubWidget() {
-  const [activeTab, setActiveTab] = useState<string | null>("runs"); // State can now be null
+  const [activeTab, setActiveTab] = useState<string | null>("runs");
   const [inspectedRunIds, setInspectedRunIds] = useState<string[]>([]);
   const [eventFilter, setEventFilter] = useState("");
 
@@ -25,7 +25,8 @@ export default function ActivityHubWidget() {
     setActiveTab(`run-detail-${runId}`);
   };
 
-  const closeRunInspector = (runId: string) => {
+  const closeRunInspector = (runId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setInspectedRunIds((prev) => prev.filter((id) => id !== runId));
     if (activeTab === `run-detail-${runId}`) {
       setActiveTab("runs");
@@ -37,12 +38,9 @@ export default function ActivityHubWidget() {
     setActiveTab("events");
   };
 
-  // --- START: DEFINITIVE FIX ---
-  // This handler correctly accepts `string | null` and provides a fallback.
   const handleTabChange = (value: string | null) => {
-    setActiveTab(value ?? "runs"); // Fallback to 'runs' if value is null
+    setActiveTab(value ?? "runs");
   };
-  // --- END: DEFINITIVE FIX ---
 
   return (
     <Box className="h-full w-full flex flex-col bg-gray-50 dark:bg-gray-900">
@@ -67,26 +65,25 @@ export default function ActivityHubWidget() {
               value={`run-detail-${runId}`}
               onMouseDown={(e) => {
                 if (e.button === 1) {
+                  // Middle mouse click
                   e.preventDefault();
                   closeRunInspector(runId);
                 }
               }}
             >
-              <Group gap="xs">
+              <Group gap="xs" wrap="nowrap">
                 <Text size="xs" component="span">
                   Run: ...{runId.slice(-6)}
                 </Text>
-                <Text
-                  size="xs"
-                  c="dimmed"
-                  component="span"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeRunInspector(runId);
-                  }}
-                >
-                  &times;
-                </Text>
+                <Tooltip label="Close Tab">
+                  <ActionIcon
+                    size="xs"
+                    variant="transparent"
+                    onClick={(e) => closeRunInspector(runId, e)}
+                  >
+                    <IconX size={12} />
+                  </ActionIcon>
+                </Tooltip>
               </Group>
             </Tabs.Tab>
           ))}

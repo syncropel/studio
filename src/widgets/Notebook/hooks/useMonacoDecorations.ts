@@ -7,15 +7,11 @@ import { ContextualPage, BlockResult } from "@/shared/types/notebook";
 
 /**
  * A custom hook to manage all gutter icon decorations for a Syncropel Notebook.
- * This hook is responsible for:
- * 1. Creating and managing a single, persistent decorations collection.
- * 2. Displaying a "Run All" icon at the top of the notebook.
- * 3. Displaying status-aware icons (run, running, success, error) for each block.
- * 4. Reactively updating these icons whenever block results change.
+ * This hook is responsible for correctly placing status-aware icons for each block
+ * by iterating through the editor's text model.
  *
- * @param editor The Monaco Editor instance, or null if not yet ready.
- * @param currentPage The currently loaded ContextualPage object.
- * @param blockResults A record of the current results for each block, used to determine icon state.
+ * CHANGED: Added proper cleanup and synchronization with editor content changes
+ * to prevent decorations from appearing at wrong positions when switching documents.
  */
 export function useMonacoDecorations(
   editor: monaco.editor.IStandaloneCodeEditor | null,
@@ -25,97 +21,132 @@ export function useMonacoDecorations(
   const decorationsCollectionRef =
     useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
 
-  // This effect's only job is to create the decorations collection when the editor is mounted.
+  // CHANGED: Track the current page ID to detect page changes
+  // Note: Using string | null | undefined to match ContextualPage.id type
+  const currentPageIdRef = useRef<string | null | undefined>(null);
+
+  // Effect to create the decorations collection once when the editor is mounted.
   useEffect(() => {
     if (editor && !decorationsCollectionRef.current) {
       decorationsCollectionRef.current = editor.createDecorationsCollection();
     }
   }, [editor]);
 
+  // CHANGED: Clear decorations immediately when page changes to null
+  useEffect(() => {
+    if (!currentPage && decorationsCollectionRef.current) {
+      decorationsCollectionRef.current.clear();
+      currentPageIdRef.current = null;
+    }
+  }, [currentPage]);
+
+  // Main effect to update decorations when the page or results change.
   useEffect(() => {
     const collection = decorationsCollectionRef.current;
-    if (!collection) return;
-
-    if (!editor || !currentPage) {
-      collection.clear();
+    if (!collection || !editor || !currentPage) {
       return;
     }
 
     const model = editor.getModel();
     if (!model) return;
 
-    const newDecorations: monaco.editor.IModelDeltaDecoration[] = [];
+    // CHANGED: Detect if we've switched to a different page
+    const pageChanged = currentPageIdRef.current !== currentPage.id;
+    if (pageChanged) {
+      // Clear immediately when switching pages
+      collection.clear();
+      currentPageIdRef.current = currentPage.id;
+    }
 
-    // --- Decoration 1: Page-level "Run All" Button on Line 1 ---
-    newDecorations.push({
-      range: {
-        startLineNumber: 1,
-        startColumn: 1,
-        endLineNumber: 1,
-        endColumn: 1,
-      },
-      options: {
-        isWholeLine: true,
-        glyphMarginClassName: "gutter-icon glyph-run-all",
-        glyphMarginHoverMessage: { value: "Run All Blocks" },
-      },
-    });
+    // CHANGED: Use requestAnimationFrame to ensure Monaco's model is fully updated
+    // This prevents decorations from being calculated on stale content
+    const frameId = requestAnimationFrame(() => {
+      const newDecorations: monaco.editor.IModelDeltaDecoration[] = [];
 
-    // --- START: DEFINITIVE FIX FOR BLOCK DECORATION PLACEMENT ---
-    // We iterate through the text model to find the correct line for each block's decoration.
-    for (let i = 1; i <= model.getLineCount(); i++) {
-      const lineText = model.getLineContent(i);
+      // --- Decoration 1: Page-level "Run All" Button on Line 1 ---
+      newDecorations.push({
+        range: new monaco.Range(1, 1, 1, 1),
+        options: {
+          isWholeLine: true,
+          glyphMarginClassName: "gutter-icon glyph-run-all",
+          glyphMarginHoverMessage: { value: "Run All Blocks" },
+        },
+      });
 
-      // A block's visual start is its ` ```yaml ` fence.
-      if (lineText.startsWith("```yaml")) {
-        let blockId: string | null = null;
-        // Look ahead a few lines to find the block's ID to confirm it's a cx_block.
-        for (let j = i + 1; j < i + 10 && j <= model.getLineCount(); j++) {
-          const innerLine = model.getLineContent(j);
-          if (innerLine.startsWith("```")) break; // Reached end of metadata
-          const match = innerLine.match(/^\s*id:\s*(\S+)/);
-          if (match) {
-            blockId = match[1];
-            break;
-          }
-        }
+      // --- Iterate through the text model line by line to find block start locations ---
+      for (let i = 1; i <= model.getLineCount(); i++) {
+        const lineText = model.getLineContent(i);
 
-        if (blockId) {
-          // We found a valid cx_block. Place the decoration on the ` ```yaml ` line (line `i`).
-          const startLine = i;
-          const result = blockResults[blockId];
-          let className = "glyph-run";
-          if (result) {
-            switch (result.status) {
-              case "running":
-                className = "glyph-running";
-                break;
-              case "success":
-                className = "glyph-success";
-                break;
-              case "error":
-                className = "glyph-error";
-                break;
+        // A block's visual start is its ` ```yaml ` fence that contains a `cx_block: true` flag.
+        if (lineText.trim().startsWith("```yaml")) {
+          let blockId: string | null = null;
+          let isCxBlock = false;
+
+          // Scan the next few lines within the YAML block to find the ID and confirm it's a cx_block.
+          for (let j = i + 1; j < i + 10 && j <= model.getLineCount(); j++) {
+            const innerLine = model.getLineContent(j);
+            if (innerLine.trim().startsWith("```")) break; // Reached end of metadata
+
+            if (innerLine.includes("cx_block: true")) {
+              isCxBlock = true;
             }
+
+            const idMatch = innerLine.match(/^\s*id:\s*(\S+)/);
+            if (idMatch) {
+              blockId = idMatch[1];
+            }
+
+            // Once we have both, we can stop scanning this metadata block.
+            if (blockId && isCxBlock) break;
           }
-          newDecorations.push({
-            range: {
-              startLineNumber: startLine,
-              startColumn: 1,
-              endLineNumber: startLine,
-              endColumn: 1,
-            },
-            options: {
-              isWholeLine: true,
-              glyphMarginClassName: `gutter-icon ${className}`,
-              glyphMarginHoverMessage: { value: `Run Block: ${blockId}` },
-            },
-          });
+
+          // If we found a valid cx_block with an ID, create its decoration.
+          if (blockId && isCxBlock) {
+            const startLine = i; // The decoration goes on the ` ```yaml ` line.
+            const result = blockResults[blockId];
+            let className = "glyph-run";
+            if (result) {
+              switch (result.status) {
+                case "running":
+                  className = "glyph-running";
+                  break;
+                case "success":
+                  className = "glyph-success";
+                  break;
+                case "error":
+                  className = "glyph-error";
+                  break;
+              }
+            }
+            newDecorations.push({
+              range: new monaco.Range(startLine, 1, startLine, 1),
+              options: {
+                isWholeLine: true,
+                glyphMarginClassName: `gutter-icon ${className}`,
+                glyphMarginHoverMessage: { value: `Run Block: ${blockId}` },
+              },
+            });
+          }
         }
       }
-    }
-    // --- END: DEFINITIVE FIX ---
 
-    collection.set(newDecorations);
+      // CHANGED: Set decorations only after we've calculated them all
+      collection.set(newDecorations);
+    });
+
+    // CHANGED: Cleanup function to cancel pending animation frame
+    return () => {
+      cancelAnimationFrame(frameId);
+    };
   }, [editor, currentPage, blockResults]);
+
+  // CHANGED: Add cleanup effect when component unmounts
+  useEffect(() => {
+    return () => {
+      if (decorationsCollectionRef.current) {
+        decorationsCollectionRef.current.clear();
+        decorationsCollectionRef.current = null;
+      }
+    };
+  }, []);
 }

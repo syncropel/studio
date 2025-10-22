@@ -1,7 +1,4 @@
 // /home/dpwanjala/repositories/syncropel/studio/src/shared/api/types.ts
-//
-// Definitive Type Definitions for the Syncropel Communication Protocol (SCP/SEP) v1.0.0
-// This file is the canonical contract between the cx-studio client and the cx-server.
 
 import type { ContextualPage } from "@/shared/types/notebook";
 
@@ -9,27 +6,20 @@ import type { ContextualPage } from "@/shared/types/notebook";
 //   SECTION 1: SERVER -> CLIENT EVENT PROTOCOL (SEP)
 // ========================================================================
 
-/**
- * The main payload envelope for every server-to-client event.
- * The actual data is nested inside the `fields` property.
- */
 export interface SepPayload {
   level: "debug" | "info" | "warn" | "error";
   message: string;
-  fields?: Record<string, any>; // The structured data for the event
+  fields?: Record<string, any>;
   labels?: Record<string, string>;
 }
 
-/**
- * The top-level message envelope for every server-to-client event.
- */
 export interface InboundMessage {
-  command_id: string; // Correlates to the client command that initiated this
-  id: string; // Unique ID for this specific event
-  type: string; // The event type, e.g., "BLOCK.OUTPUT"
+  command_id: string;
+  id: string;
+  type: string;
   source: string;
   timestamp: string;
-  payload: SepPayload; // The payload is now this structured envelope
+  payload: SepPayload;
 }
 
 // --- Specific `fields` Schemas for Block Events ---
@@ -39,7 +29,6 @@ export interface BlockStatusFields {
   status: "running" | "pending" | "skipped";
 }
 
-// The "Claim Check" for large data artifacts, sent via the Data Plane
 export interface DataRef {
   artifact_id: string;
   renderer_hint: string;
@@ -47,10 +36,9 @@ export interface DataRef {
   access_url: string;
 }
 
-// The output of a block, implementing the Hybrid Claim Check pattern
 export interface BlockOutput {
-  inline_data?: SDUIPayload; // For small results
-  data_ref?: DataRef; // For large results
+  inline_data?: SDUIPayload;
+  data_ref?: DataRef;
 }
 
 export interface BlockOutputFields {
@@ -80,13 +68,26 @@ export interface SessionLoadedFields {
 }
 
 export interface PageLoadedFields {
-  page: ContextualPage;
+  uri: string;
+  content: string;
+  initial_model: ContextualPage;
+}
+
+export interface PageSavedFields {
+  uri: string;
+  name: string;
+  version: string;
+}
+
+export interface PageStatusFields {
+  status: "running" | "completed" | "failed";
+  current_block_id?: string;
 }
 
 export interface WorkspaceBrowseResultFields {
   path: string;
   data: {
-    projects: any[]; // Define more strictly if needed
+    projects: any[];
     library: any[];
   };
 }
@@ -97,11 +98,40 @@ export interface HomepageDataResultFields {
   discover_items: any[];
 }
 
+export interface RunHistoryItem {
+  run_id: string;
+  flow_id: string;
+  status: string;
+  timestamp_utc: string;
+  parameters: Record<string, any>;
+}
+
+export interface RunDetailStep {
+  id: string;
+  status: string;
+  duration_ms: number;
+}
+
+export interface RunDetailArtifact {
+  name: string;
+  size_bytes: number;
+  access_url: string;
+}
+
+export interface RunDetail {
+  run_id: string;
+  flow_id: string;
+  status: string;
+  steps: RunDetailStep[];
+  artifacts: RunDetailArtifact[];
+}
+
+export type RunHistoryResultFields = RunHistoryItem[];
+export type RunDetailResultFields = RunDetail;
+
 // ========================================================================
 //   SECTION 2: SYNCROPEL DECLARATIVE UI (SDUI) SCHEMAS
 // ========================================================================
-// These types define the contract for the server to declaratively render UI
-// components on the client.
 
 export interface SDUIPayloadBase {
   ui_component: string;
@@ -133,24 +163,17 @@ export interface SDUIImagePayload extends SDUIPayloadBase {
   props: { src: string; alt?: string };
 }
 
-// Add other SDUI component types here (Tree, Form, etc.)
-
-// The master discriminated union for all possible SDUI payloads.
 export type SDUIPayload =
   | SDUITablePayload
   | SDUIJsonPayload
   | SDUICardPayload
   | SDUIImagePayload
-  | SDUIPayloadBase; // Fallback for custom components
+  | SDUIPayloadBase;
 
-/**
- * Defines the shape of an artifact's content when it's fetched for preview
- * in the Inspector panel. This is the expected payload for an ARTIFACT_CONTENT_RESULT event.
- */
 export interface InspectedArtifact {
-  id: string; // A unique ID for the preview, usually `${runId}-${artifactName}`
+  id: string;
   runId: string;
   artifactName: string;
-  content: any; // The actual fetched content (JSON object, text, etc.)
-  type: "table" | "image" | "json" | "text" | "unknown"; // A hint for rendering
+  content: any;
+  type: "table" | "image" | "json" | "text" | "unknown";
 }

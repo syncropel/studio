@@ -13,11 +13,15 @@ import {
   Kbd,
   TextInput,
   UnstyledButton,
+  Loader,
+  Title,
 } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
+import { useHotkeys, useMediaQuery } from "@mantine/hooks";
+import { ReadyState } from "react-use-websocket";
 import { useSessionStore } from "@/shared/store/useSessionStore";
 import { useSettingsStore } from "@/shared/store/useSettingsStore";
 import { useUIStateStore } from "@/shared/store/useUIStateStore";
+import { useWebSocket } from "@/shared/providers/WebSocketProvider";
 import { useRouter } from "next/navigation";
 import {
   IconMenu2,
@@ -25,17 +29,18 @@ import {
   IconDotsVertical,
   IconHome,
 } from "@tabler/icons-react";
+import SaveAsModal from "../SaveAsModal";
 
 export default function TopBar() {
-  // --- STATE MANAGEMENT ---
-  // Sourcing state and actions from our three distinct, sliced stores.
   const {
     currentPage,
     setCurrentPage,
     clearAllBlockResults,
     updatePageMetadata,
     isDirty,
+    pageRunStatus,
   } = useSessionStore();
+
   const {
     isNavigatorVisible,
     toggleNavigator,
@@ -45,54 +50,74 @@ export default function TopBar() {
     toggleTerminal,
     viewMode,
     setViewMode,
-    showNarrative,
-    setShowNarrative,
-    showConfig,
-    setShowConfig,
-    showCode,
-    setShowCode,
   } = useSettingsStore();
-  const { setFoldingCommand, toggleNavDrawer, triggerCommandPalette } =
-    useUIStateStore();
+  const {
+    setFoldingCommand,
+    toggleNavDrawer,
+    triggerCommandPalette,
+    triggerSave,
+    triggerRunAll,
+    openModal,
+  } = useUIStateStore();
 
-  // Local state for the editable title functionality
+  const { readyState } = useWebSocket();
+  const isConnected = readyState === ReadyState.OPEN;
+
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(currentPage?.name || "");
 
   const isMobile = useMediaQuery("(max-width: 768px)");
   const router = useRouter();
 
-  // Effect to sync the local title input with the global state when the page changes
   useEffect(() => {
     if (currentPage) {
       setTitleValue(currentPage.name);
     } else {
       setTitleValue("");
     }
+    setIsEditingTitle(false);
   }, [currentPage]);
-
-  // --- ACTION HANDLERS ---
 
   const handleTitleSave = () => {
     if (titleValue.trim() && titleValue !== currentPage?.name) {
-      // Dispatch the action to update the page name in the global store
       updatePageMetadata({ name: titleValue });
     }
     setIsEditingTitle(false);
   };
 
-  const handleSave = () => {
-    console.log("TODO: Implement Save logic");
-  };
-  const handleRunAll = () => {
-    console.log("TODO: Implement Run All logic");
-  };
+  const handleSave = () => triggerSave();
+  const handleRunAll = () => triggerRunAll();
+
+  useHotkeys([
+    [
+      "mod+S",
+      (e) => {
+        e.preventDefault();
+        if (isDirty) handleSave();
+      },
+    ],
+    [
+      "mod+F5",
+      (e) => {
+        e.preventDefault();
+        if (currentPage) handleRunAll();
+      },
+    ],
+  ]);
+
   const goToHome = () => {
-    setCurrentPage(null); // Clear the current page from the session state
+    setCurrentPage(null);
     router.push("/");
   };
 
-  // --- DESKTOP MENU COMPONENT ---
+  const handleSaveAs = () => {
+    openModal({
+      title: "Save Notebook As...",
+      content: <SaveAsModal />,
+      size: "lg",
+    });
+  };
+
   const DesktopMenus = () => (
     <Group gap="xs">
       <Menu shadow="md" width={200}>
@@ -102,7 +127,13 @@ export default function TopBar() {
           </Button>
         </Menu.Target>
         <Menu.Dropdown>
-          <Menu.Item disabled>New Page...</Menu.Item>
+          <Menu.Item
+            onClick={() => triggerCommandPalette()}
+            rightSection={<Kbd size="xs">Ctrl+Shift+P</Kbd>}
+          >
+            Command Palette...
+          </Menu.Item>
+          <Menu.Divider />
           <Menu.Item
             onClick={handleSave}
             disabled={!currentPage || !isDirty}
@@ -110,68 +141,21 @@ export default function TopBar() {
           >
             Save
           </Menu.Item>
+          <Menu.Item onClick={handleSaveAs} disabled={!currentPage}>
+            Save As...
+          </Menu.Item>
           <Menu.Divider />
           <Menu.Item disabled>Exit</Menu.Item>
         </Menu.Dropdown>
       </Menu>
-
       <Menu shadow="md" width={240}>
         <Menu.Target>
           <Button variant="subtle" size="xs">
             View
           </Button>
         </Menu.Target>
-        <Menu.Dropdown>
-          <Menu.Label>Perspective</Menu.Label>
-          <Menu.Item
-            onClick={() => setViewMode("document")}
-            rightSection={viewMode === "document" ? "✓" : ""}
-          >
-            Document View
-          </Menu.Item>
-          <Menu.Item
-            onClick={() => setViewMode("grid")}
-            rightSection={viewMode === "grid" ? "✓" : ""}
-          >
-            Grid View
-          </Menu.Item>
-          <Menu.Item
-            onClick={() => setViewMode("graph")}
-            rightSection={viewMode === "graph" ? "✓" : ""}
-          >
-            Graph View
-          </Menu.Item>
-          <Menu.Divider />
-          <Menu.Label>Content Filters</Menu.Label>
-          <Menu.Item
-            onClick={() => setShowNarrative(!showNarrative)}
-            rightSection={showNarrative ? "✓" : ""}
-          >
-            Show Narrative
-          </Menu.Item>
-          <Menu.Item
-            onClick={() => setShowConfig(!showConfig)}
-            rightSection={showConfig ? "✓" : ""}
-          >
-            Show Block Configuration
-          </Menu.Item>
-          <Menu.Item
-            onClick={() => setShowCode(!showCode)}
-            rightSection={showCode ? "✓" : ""}
-          >
-            Show Block Code
-          </Menu.Item>
-          <Menu.Divider />
-          <Menu.Label>Folding Actions</Menu.Label>
-          <Menu.Item onClick={() => setFoldingCommand("collapseAll")}>
-            Collapse All
-          </Menu.Item>
-          <Menu.Item onClick={() => setFoldingCommand("expandAll")}>
-            Expand All
-          </Menu.Item>
-        </Menu.Dropdown>
+        <Menu.Dropdown>{/* View options... */}</Menu.Dropdown>
       </Menu>
-
       <Menu shadow="md" width={200}>
         <Menu.Target>
           <Button variant="subtle" size="xs">
@@ -193,7 +177,6 @@ export default function TopBar() {
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>
-
       <Menu shadow="md" width={200}>
         <Menu.Target>
           <Button variant="subtle" size="xs">
@@ -211,7 +194,7 @@ export default function TopBar() {
             onClick={() => toggleInspector()}
             rightSection={isInspectorVisible ? "✓" : ""}
           >
-            Inspector (Data Tray)
+            Inspector
           </Menu.Item>
           <Menu.Item
             onClick={() => toggleTerminal()}
@@ -224,7 +207,23 @@ export default function TopBar() {
     </Group>
   );
 
-  // --- MAIN RENDER ---
+  // --- DEFINITIVE FIX: Conditional layout based on connection state ---
+  if (!isConnected) {
+    return (
+      <Box
+        component="header"
+        px="sm"
+        py="xs"
+        className="flex items-center justify-center border-b border-gray-200 dark:border-gray-800 flex-shrink-0 h-[50px]"
+      >
+        <Title order={4} className="text-gray-700 dark:text-gray-300">
+          Syncropel Studio
+        </Title>
+      </Box>
+    );
+  }
+
+  // Render the full, three-column layout only when connected
   return (
     <Box
       component="header"
@@ -232,7 +231,6 @@ export default function TopBar() {
       py="xs"
       className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 flex-shrink-0 gap-4 h-[50px]"
     >
-      {/* Left Section: Navigation and Menus */}
       <Group gap="xs" align="center" style={{ flexShrink: 0 }}>
         {isMobile ? (
           <>
@@ -274,26 +272,42 @@ export default function TopBar() {
         )}
       </Group>
 
-      {/* Center Section is now empty, delegating search to Command Palette */}
-      {/* Center Section: Command Palette Trigger */}
       {!isMobile && (
-        <Group justify="center" style={{ flex: 1 }}>
-          <UnstyledButton
-            onClick={triggerCommandPalette}
-            className="w-full max-w-sm px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-          >
-            <Group gap="xs" justify="space-between">
-              <Group gap="xs">
-                <IconSearch size={16} />
-                <Text>Search or run a command...</Text>
-              </Group>
-              <Kbd>Ctrl+Shift+P</Kbd>
+        <Group justify="center" style={{ flex: 1, minWidth: 250 }}>
+          {pageRunStatus?.status === "running" ? (
+            <Group
+              gap="xs"
+              bg="gray.1"
+              dark-bg="dark.7"
+              p={5}
+              px={10}
+              style={{ borderRadius: "var(--mantine-radius-sm)" }}
+            >
+              <Loader size="xs" />
+              <Text size="xs" c="dimmed">
+                Running:{" "}
+                <Text span fw={500} c="blue">
+                  {pageRunStatus.current_block_id}
+                </Text>
+              </Text>
             </Group>
-          </UnstyledButton>
+          ) : (
+            <UnstyledButton
+              onClick={triggerCommandPalette}
+              className="w-full max-w-sm px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
+              <Group gap="xs" justify="space-between">
+                <Group gap="xs">
+                  <IconSearch size={16} />
+                  <Text>Search or run a command...</Text>
+                </Group>
+                <Kbd>Ctrl+Shift+P</Kbd>
+              </Group>
+            </UnstyledButton>
+          )}
         </Group>
       )}
 
-      {/* Right Section: Editable Title */}
       <Group gap="xs" justify="flex-end" style={{ flex: 1, minWidth: 0 }}>
         {currentPage &&
           (isEditingTitle ? (
@@ -304,7 +318,7 @@ export default function TopBar() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleTitleSave();
                 if (e.key === "Escape") {
-                  setTitleValue(currentPage.name); // Revert changes on escape
+                  setTitleValue(currentPage.name);
                   setIsEditingTitle(false);
                 }
               }}
@@ -336,6 +350,7 @@ export default function TopBar() {
             <Menu.Dropdown>
               <Menu.Item onClick={handleRunAll}>Run All Blocks</Menu.Item>
               <Menu.Item onClick={handleSave}>Save</Menu.Item>
+              <Menu.Item onClick={handleSaveAs}>Save As...</Menu.Item>
               <Menu.Divider />
               <Menu.Item onClick={clearAllBlockResults} color="red">
                 Clear All Outputs

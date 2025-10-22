@@ -2,30 +2,27 @@
 "use client";
 
 import React from "react";
-import { Box, ScrollArea, Center, Text, Kbd } from "@mantine/core";
+import dynamic from "next/dynamic"; // --- NEW: Import dynamic from next/dynamic ---
+import { Box, ScrollArea, Center, Loader } from "@mantine/core";
 import { useSessionStore } from "@/shared/store/useSessionStore";
 import { useSettingsStore } from "@/shared/store/useSettingsStore";
-import DocumentView from "./views/DocumentView";
+
+// --- START: DEFINITIVE FIX FOR SSR CRASH ---
+// We now dynamically import DocumentView and explicitly disable Server-Side Rendering (SSR).
+// This ensures the `monaco-editor` library, which depends on the `window` object,
+// is only ever loaded and executed in the browser.
+const DocumentView = dynamic(() => import("./views/DocumentView"), {
+  ssr: false, // This is the crucial part
+  loading: () => (
+    <Center h="100%">
+      <Loader />
+    </Center>
+  ),
+});
+// --- END: DEFINITIVE FIX ---
+
 import GridView from "./views/GridView";
 import GraphView from "./views/GraphView";
-
-// A new component for our "Welcome Prompt"
-const WelcomePrompt = () => (
-  <Center h="100%">
-    <Box ta="center">
-      <Text size="xl" fw={500}>
-        Syncropel Studio
-      </Text>
-      <Text c="dimmed" mt="sm">
-        Press <Kbd>Ctrl+Shift+P</Kbd> or <Kbd>F1</Kbd> to open the Command
-        Palette.
-      </Text>
-      <Text c="dimmed" mt="xs">
-        Or, select a recent file from the Workspace navigator.
-      </Text>
-    </Box>
-  </Center>
-);
 
 export default function Notebook() {
   const { currentPage } = useSessionStore();
@@ -45,19 +42,19 @@ export default function Notebook() {
       }
     }
 
-    // --- THIS IS THE KEY CHANGE ---
-    // If there is NO current page, we are in the "shell" state.
-    // We will render the DocumentView, which will show our welcome prompt.
+    // If there is NO current page, render the DocumentView which will
+    // show its own internal "Welcome Prompt" state.
     return <DocumentView />;
   };
 
   return (
     <Box className="h-full flex flex-col bg-white dark:bg-black">
-      <ScrollArea className="flex-grow">
-        {/* We remove the outer padding and header logic from here. 
-              DocumentView will now manage its own header. */}
-        {renderView()}
-      </ScrollArea>
+      {/* 
+        The ScrollArea is now removed from here. The DocumentView and other
+        views are now responsible for their own scrolling behavior to allow for
+        more complex layouts like the fixed-header editor.
+      */}
+      {renderView()}
     </Box>
   );
 }

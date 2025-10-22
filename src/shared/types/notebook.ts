@@ -1,4 +1,5 @@
-// Import the definitive "fields" types from our API contract.
+// /home/dpwanjala/repositories/syncropel/studio/src/shared/types/notebook.ts
+
 import {
   BlockStatusFields,
   BlockOutputFields,
@@ -33,13 +34,12 @@ export interface ContextualPage {
   description?: string;
   inputs?: Record<string, PageInputParameter>;
   blocks: Block[];
+  author?: string;
+  tags?: string[];
 }
 
-// --- NEW, DEFINITIVE BLOCK RESULT TYPE ---
-// This is now the single source of truth for what a block's result looks like.
-// It's a union of the possible `fields` objects from server events.
 export type BlockResult =
-  | { status: "pending" } // A local-only initial state
-  | BlockStatusFields // { status: 'running' | 'skipped', ... }
-  | BlockOutputFields // { status: 'success', output: ..., ... }
-  | BlockErrorFields; // { status: 'error', error: ..., ... }
+  | { status: "pending" }
+  | BlockStatusFields
+  | BlockOutputFields
+  | BlockErrorFields;

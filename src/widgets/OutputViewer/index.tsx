@@ -1,7 +1,7 @@
 // /home/dpwanjala/repositories/syncropel/studio/src/widgets/OutputViewer/index.tsx
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import {
   Loader,
   Text,
@@ -17,7 +17,6 @@ import {
 import {
   IconEye,
   IconDownload,
-  IconAlertCircle,
   IconPin,
   IconPinnedOff,
   IconArrowsMaximize,
@@ -35,12 +34,11 @@ import type {
   InspectedArtifact,
 } from "@/shared/api/types";
 import DynamicUIRenderer from "./renderers/DynamicUIRenderer";
+import ErrorRenderer from "./renderers/ErrorRenderer";
 
-// Helper function to safely fetch artifact content
 const fetchArtifactContent = (dataRef: DataRef) => {
-  return fetch(
-    new URL(dataRef.access_url, window.location.origin).toString()
-  ).then((res) => {
+  const url = new URL(dataRef.access_url, window.location.origin);
+  return fetch(url.toString()).then((res) => {
     if (!res.ok) throw new Error(`Failed to fetch artifact: ${res.statusText}`);
     const contentType = res.headers.get("content-type");
     if (contentType?.includes("application/json")) return res.json();
@@ -48,7 +46,6 @@ const fetchArtifactContent = (dataRef: DataRef) => {
   });
 };
 
-// --- SUB-COMPONENT: ArtifactRenderer (Handles "Claim Checks") ---
 const ArtifactRenderer = ({
   dataRef,
   blockId,
@@ -79,18 +76,21 @@ const ArtifactRenderer = ({
       "_blank"
     );
 
-  const handlePinToggle = async () => {
+  const handlePinToggle = useCallback(async () => {
     if (isPinned) {
       removeInspectedArtifact(artifactId);
-      if (inspectedArtifacts.length === 1 && isInspectorVisible)
+      if (inspectedArtifacts.length === 1 && isInspectorVisible) {
         toggleInspector(false);
+      }
       return;
     }
+
     try {
       const content = await queryClient.fetchQuery({
         queryKey: ["artifact", dataRef.artifact_id],
         queryFn: () => fetchArtifactContent(dataRef),
       });
+
       const artifact: InspectedArtifact = {
         id: artifactId,
         runId: blockId,
@@ -99,16 +99,30 @@ const ArtifactRenderer = ({
         type: dataRef.renderer_hint as any,
       };
       addInspectedArtifact(artifact);
-      if (!isInspectorVisible) toggleInspector(true);
+
+      if (!isInspectorVisible) {
+        toggleInspector(true);
+      }
     } catch (e) {
       console.error("Failed to fetch artifact for pinning:", e);
     }
-  };
+  }, [
+    isPinned,
+    artifactId,
+    dataRef,
+    blockId,
+    queryClient,
+    addInspectedArtifact,
+    removeInspectedArtifact,
+    isInspectorVisible,
+    toggleInspector,
+    inspectedArtifacts.length,
+  ]);
 
   const contentWhenLoaded = useMemo(() => {
     if (!data) return null;
     const schema: SDUIPayload = {
-      ui_component: dataRef.renderer_hint,
+      ui_component: dataRef.renderer_hint as any,
       props: { data },
     };
     return <DynamicUIRenderer schema={schema} />;
@@ -122,14 +136,8 @@ const ArtifactRenderer = ({
           <Loader size="xs" />
         </Center>
       );
-    if (isError)
-      return (
-        <Text c="red" size="sm">
-          Error: {error.message}
-        </Text>
-      );
+    if (isError) return <ErrorRenderer error={{ message: error.message }} />;
 
-    // Initial "Claim Check" card
     return (
       <Group justify="space-between">
         <Box>
@@ -138,7 +146,7 @@ const ArtifactRenderer = ({
           </Text>
           <Text size="xs" c="dimmed">
             {dataRef.metadata?.record_count
-              ? `${dataRef.metadata.record_count} records.`
+              ? `${dataRef.metadata.record_count.toLocaleString()} records.`
               : "Data available."}
           </Text>
         </Box>
@@ -162,12 +170,19 @@ const ArtifactRenderer = ({
         </Group>
       </Group>
     );
-  }, [data, isLoading, isError, dataRef, handleDownload, contentWhenLoaded]);
+  }, [
+    data,
+    isLoading,
+    isError,
+    error,
+    dataRef,
+    handleDownload,
+    contentWhenLoaded,
+  ]);
 
   return (
     <>
       <Paper withBorder p="md" radius="md" className="relative">
-        {/* --- DEFINITIVE FIX: ADDED TOOLBAR TO ARTIFACT RENDERER --- */}
         <Group gap="xs" className="absolute top-2 right-2 z-10">
           <Tooltip
             label={isPinned ? "Un-pin from Data Tray" : "Pin to Data Tray"}
@@ -181,6 +196,7 @@ const ArtifactRenderer = ({
               variant="default"
               size="sm"
               onClick={() => setIsFocused(true)}
+              disabled={!data}
             >
               <IconArrowsMaximize size={14} />
             </ActionIcon>
@@ -197,8 +213,6 @@ const ArtifactRenderer = ({
             </ActionIcon>
           </Tooltip>
         </Group>
-
-        {/* --- DEFINITIVE FIX: ADD PADDING WHEN TOOLBAR IS VISIBLE --- */}
         <Box pt={data ? "xl" : 0}>{mainContent}</Box>
       </Paper>
       <Modal
@@ -208,14 +222,13 @@ const ArtifactRenderer = ({
         title={`Focused Output: ${blockId}`}
       >
         <Box style={{ maxHeight: "80vh", overflowY: "auto" }}>
-          {contentWhenLoaded || mainContent}
+          {contentWhenLoaded}
         </Box>
       </Modal>
     </>
   );
 };
 
-// --- MAIN COMPONENT: OutputViewer ---
 interface OutputViewerProps {
   blockResult: BlockResult | undefined;
 }
@@ -236,7 +249,7 @@ export default function OutputViewer({ blockResult }: OutputViewerProps) {
     if (blockResult?.status === "success" && blockResult.output.inline_data) {
       return `${blockId}-inline-success`;
     }
-    return null; // data_ref is handled by ArtifactRenderer
+    return null;
   }, [blockResult, blockId]);
 
   const isPinned = useMemo(() => {
@@ -265,7 +278,7 @@ export default function OutputViewer({ blockResult }: OutputViewerProps) {
     } else {
       content = inlineData.props;
     }
-    type = inlineData.ui_component;
+    type = inlineData.ui_component.split(":")[0];
 
     const artifact: InspectedArtifact = {
       id: artifactId,
@@ -289,20 +302,7 @@ export default function OutputViewer({ blockResult }: OutputViewerProps) {
           </Center>
         );
       case "error":
-        return (
-          <Paper withBorder p="md" radius="md">
-            <Group gap="xs" c="red" wrap="nowrap" align="flex-start">
-              {" "}
-              <IconAlertCircle
-                size={16}
-                style={{ flexShrink: 0, marginTop: 2 }}
-              />{" "}
-              <Text size="sm" ff="monospace" style={{ whiteSpace: "pre-wrap" }}>
-                {blockResult.error.message || "An unknown error occurred."}
-              </Text>{" "}
-            </Group>
-          </Paper>
-        );
+        return <ErrorRenderer error={blockResult.error} />;
       case "success":
         if (blockResult.output?.inline_data) {
           return <DynamicUIRenderer schema={blockResult.output.inline_data} />;
@@ -316,11 +316,9 @@ export default function OutputViewer({ blockResult }: OutputViewerProps) {
           );
         }
         return (
-          <Paper withBorder p="md" radius="md">
-            <Text c="dimmed" size="sm">
-              Success (no output).
-            </Text>
-          </Paper>
+          <Text c="dimmed" size="sm">
+            Success (no output).
+          </Text>
         );
       default:
         return null;
@@ -334,33 +332,45 @@ export default function OutputViewer({ blockResult }: OutputViewerProps) {
     blockResult?.status === "success" && blockResult.output.inline_data;
   const isErrorOrRunning =
     blockResult?.status === "error" || blockResult?.status === "running";
+  const showToolbar = isInlineData || isErrorOrRunning;
 
-  // The main viewer only renders the toolbar for inline data. ArtifactRenderer handles its own.
-  if (!isInlineData) {
+  if (blockResult?.status === "success" && blockResult.output.data_ref) {
     return outputContent;
   }
 
   return (
     <>
       <Paper withBorder p="md" radius="md" className="relative">
-        {!isErrorOrRunning && (
+        {showToolbar && (
           <Group gap="xs" className="absolute top-2 right-2 z-10">
-            <Tooltip
-              label={isPinned ? "Un-pin from Data Tray" : "Pin to Data Tray"}
-            >
-              <ActionIcon variant="default" size="sm" onClick={handlePinToggle}>
-                {isPinned ? <IconPinnedOff size={14} /> : <IconPin size={14} />}
-              </ActionIcon>
-            </Tooltip>
-            <Tooltip label="Focus Output">
-              <ActionIcon
-                variant="default"
-                size="sm"
-                onClick={() => setIsFocused(true)}
+            {isInlineData && (
+              <Tooltip
+                label={isPinned ? "Un-pin from Data Tray" : "Pin to Data Tray"}
               >
-                <IconArrowsMaximize size={14} />
-              </ActionIcon>
-            </Tooltip>
+                <ActionIcon
+                  variant="default"
+                  size="sm"
+                  onClick={handlePinToggle}
+                >
+                  {isPinned ? (
+                    <IconPinnedOff size={14} />
+                  ) : (
+                    <IconPin size={14} />
+                  )}
+                </ActionIcon>
+              </Tooltip>
+            )}
+            {!isErrorOrRunning && isInlineData && (
+              <Tooltip label="Focus Output">
+                <ActionIcon
+                  variant="default"
+                  size="sm"
+                  onClick={() => setIsFocused(true)}
+                >
+                  <IconArrowsMaximize size={14} />
+                </ActionIcon>
+              </Tooltip>
+            )}
             {blockId && (
               <Tooltip label="Close Output">
                 <ActionIcon
@@ -374,7 +384,7 @@ export default function OutputViewer({ blockResult }: OutputViewerProps) {
             )}
           </Group>
         )}
-        <Box pt="xl">{outputContent}</Box>
+        <Box pt={showToolbar ? "xl" : 0}>{outputContent}</Box>
       </Paper>
       <Modal
         opened={isFocused}

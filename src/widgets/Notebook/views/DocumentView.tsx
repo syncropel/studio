@@ -1,4 +1,3 @@
-// /home/dpwanjala/repositories/syncropel/studio/src/widgets/Notebook/views/DocumentView.tsx
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
@@ -10,11 +9,13 @@ import { nanoid } from "nanoid";
 import { useSessionStore } from "@/shared/store/useSessionStore";
 import { useUIStateStore } from "@/shared/store/useUIStateStore";
 import { useWebSocket } from "@/shared/providers/WebSocketProvider";
+import { serializePageToText } from "@/shared/lib/serialization";
 import { useMonacoDecorations } from "../hooks/useMonacoDecorations";
 import { registerSemanticFolding } from "../hooks/useSemanticFolding";
 import { useMonacoWidgets } from "../hooks/useMonacoWidgets";
 import { useFoldingWidgets } from "../hooks/useFoldingWidgets";
 import { ContextualPage } from "@/shared/types/notebook";
+import SaveAsModal, { setEditorInstance } from "@/widgets/SaveAsModal";
 
 const log = (message: string, ...args: any[]) =>
   console.log(`[DocumentView] ${message}`, ...args);
@@ -27,6 +28,8 @@ export default function DocumentView() {
     setCurrentPage,
     blockResults,
     pageParameters,
+    setIsDirty,
+    clearAllBlockResults,
   } = useSessionStore();
 
   const [content, setContent] = useState<string | null>(null);
@@ -37,9 +40,11 @@ export default function DocumentView() {
     setFoldingCommand,
     showCommandPalette,
     resetCommandPalette,
+    saveTrigger,
+    openModal,
+    runAllTrigger,
   } = useUIStateStore();
 
-  // --- LOGIC DELEGATED TO CUSTOM HOOKS ---
   const editorInstance = isEditorReady ? editorRef.current : null;
   useMonacoDecorations(editorInstance, currentPage, blockResults);
   const outputPortals = useMonacoWidgets(
@@ -48,24 +53,64 @@ export default function DocumentView() {
     blockResults
   );
   const foldingPortals = useFoldingWidgets(editorInstance);
-  // --- END ---
+
+  useEffect(() => {
+    if (saveTrigger > 0) {
+      log("Save triggered from UI store.");
+      const editor = editorRef.current;
+      const page = useSessionStore.getState().currentPage;
+
+      if (editor && page) {
+        if (page.id?.startsWith("local-")) {
+          openModal({
+            title: "Save Notebook As...",
+            content: <SaveAsModal />,
+            size: "lg",
+          });
+        } else {
+          const currentContent = editor.getValue();
+          const serializedContent = serializePageToText(page, currentContent);
+          sendJsonMessage({
+            type: "PAGE.SAVE",
+            command_id: `save-page-${nanoid()}`,
+            payload: {
+              uri: page.id,
+              content: serializedContent,
+            },
+          });
+        }
+      }
+    }
+  }, [saveTrigger, openModal, sendJsonMessage]);
+
+  useEffect(() => {
+    if (runAllTrigger > 0) {
+      log("Run All triggered from UI store.");
+      const page = useSessionStore.getState().currentPage;
+      if (page?.id) {
+        clearAllBlockResults();
+        sendJsonMessage({
+          type: "PAGE.RUN",
+          command_id: `run-page-${nanoid()}`,
+          payload: {
+            page_id: page.id,
+            parameters: pageParameters,
+          },
+        });
+      }
+    }
+  }, [runAllTrigger, sendJsonMessage, pageParameters, clearAllBlockResults]);
 
   useEffect(() => {
     if (editorInstance && showCommandPalette) {
-      log("Executing command: show command palette");
       editorInstance.focus();
-      // This is the official, built-in action ID for the command palette
       editorInstance.getAction("editor.action.quickCommand")?.run();
-
-      // CRITICAL: Reset the trigger so it can be fired again.
       resetCommandPalette();
     }
   }, [editorInstance, showCommandPalette, resetCommandPalette]);
 
-  // Effect to handle folding commands from the TopBar
   useEffect(() => {
     if (editorInstance && foldingCommand) {
-      log(`Executing folding command from UI store: ${foldingCommand}`);
       editorInstance.focus();
       if (foldingCommand === "collapseAll") {
         editorInstance.getAction("editor.foldAll")?.run();
@@ -82,8 +127,6 @@ export default function DocumentView() {
     }
   }, [editorInstance, foldingCommand, setFoldingCommand]);
 
-  // Effect to manage the editor's content based on the current state
-  // Effect to manage the editor's content based on the current state
   useEffect(() => {
     const welcomePrompt = [
       `// Welcome to Syncropel Studio`,
@@ -91,44 +134,43 @@ export default function DocumentView() {
       `// Press Ctrl+Shift+P or F1 to open the Command Palette to:`,
       `//   - Create a new notebook from an AI prompt`,
       `//   - Create a new blank notebook`,
-      `//   - Open a recent file (coming soon)`,
       ``,
       `// Or, select a file from the Workspace navigator on the left.`,
     ].join("\n");
 
-    // --- START: DEFINITIVE FIX FOR STATE SYNC ---
     if (currentPage) {
-      // A page is active. The content should come from a PAGE.LOADED event.
       if (
         lastJsonMessage?.type === "PAGE.LOADED" &&
         lastJsonMessage.payload.fields?.content
       ) {
         const newContent = lastJsonMessage.payload.fields.content;
-        // Only update if the content is actually different to avoid needless re-renders.
         if (content !== newContent) {
-          log(
-            "Received new page content from WebSocket. Setting editor value."
-          );
           setContent(newContent);
         }
       }
     } else {
-      // NO page is active. The editor should ALWAYS show the welcome prompt.
       if (content !== welcomePrompt) {
-        log("No current page. Resetting editor to welcome prompt.");
         setContent(welcomePrompt);
       }
     }
-    // --- END: DEFINITIVE FIX ---
   }, [lastJsonMessage, currentPage, content]);
 
   const handleRunBlock = useCallback(
     (blockId: string) => {
-      if (!currentPage?.id) return;
+      // CHANGED: Read currentPage fresh from store instead of using closure
+      const currentPage = useSessionStore.getState().currentPage;
+      if (!currentPage?.id) {
+        log("Cannot run block - no currentPage set");
+        return;
+      }
+      log(`Running block: ${blockId}`);
       useSessionStore.getState().setBlockResult(blockId, { status: "pending" });
       const currentBlockState = useSessionStore
         .getState()
         .currentPage?.blocks.find((b) => b.id === blockId);
+
+      // CHANGED: Also read pageParameters fresh
+      const pageParameters = useSessionStore.getState().pageParameters;
       sendJsonMessage({
         type: "BLOCK.RUN",
         command_id: `run-block-${nanoid()}`,
@@ -140,30 +182,28 @@ export default function DocumentView() {
         },
       });
     },
-    [currentPage, pageParameters, sendJsonMessage]
+    [sendJsonMessage] // CHANGED: Removed currentPage and pageParameters from dependencies
   );
 
   const handleRunPage = useCallback(() => {
-    log("TODO: User triggered RUN ALL");
+    const { triggerRunAll } = useUIStateStore.getState();
+    triggerRunAll();
   }, []);
 
   const handleEditorDidMount: OnMount = (editor, monacoInstance) => {
     log("Monaco Editor instance has mounted.");
     editorRef.current = editor;
     setIsEditorReady(true);
+    setEditorInstance(editor);
 
     registerSemanticFolding(monacoInstance);
 
-    // --- COMMAND PALETTE INTEGRATION ---
     editor.addAction({
       id: "syncropel-new-from-ai",
       label: "Syncropel: Create New Notebook from AI Prompt...",
       run: async (ed: monaco.editor.ICodeEditor) => {
-        const prompt = window.prompt(
-          "Enter your high-level goal for the new notebook (e.g., 'Fetch my GitHub repos and count them by language')"
-        );
+        const prompt = window.prompt("Enter your goal for the new notebook...");
         if (prompt) {
-          log(`Sending PAGE.GENERATE_FROM_PROMPT with prompt: "${prompt}"`);
           sendJsonMessage({
             type: "PAGE.GENERATE_FROM_PROMPT",
             command_id: `generate-${nanoid()}`,
@@ -177,88 +217,105 @@ export default function DocumentView() {
       id: "syncropel-new-blank-notebook",
       label: "Syncropel: Create New Blank Notebook",
       run: (ed: monaco.editor.ICodeEditor) => {
-        // --- START: DEFINITIVE FIX FOR NEW NOTEBOOK CONTENT ---
         const newNotebookContent = [
           "---",
-          "name: Untitled Python Notebook",
-          "description: A new notebook for exploring Python.",
+          "name: Untitled Notebook",
+          "description: A new blank notebook.",
           "---",
           "",
-          "# My First Python Block",
+          "# New Notebook",
           "",
-          'This is a simple "Hello, World!" example using a Python block.',
-          "",
-          "```yaml",
-          "cx_block: true",
-          `id: hello_world_${nanoid(6)}`, // Use a short unique ID
-          "engine: python",
-          "name: Say Hello",
-          "```",
-          "```python",
-          'print("Hello, Syncropel!")',
-          "```",
+          "Start by adding a code block or writing some notes.",
         ].join("\n");
-
         const newPageModel: Partial<ContextualPage> = {
           id: `local-${nanoid()}`,
-          name: "Untitled Python Notebook",
-          description: "A new notebook for exploring Python.",
-          blocks: [
-            {
-              id: `hello_world_${nanoid(6)}`,
-              engine: "python",
-              name: "Say Hello",
-              content: 'print("Hello, Syncropel!")',
-              inputs: [],
-              outputs: [],
-            },
-          ],
+          name: "Untitled Notebook",
+          description: "A new blank notebook.",
+          blocks: [],
         };
-
-        // This is a client-side action
         setCurrentPage(newPageModel as ContextualPage);
         setContent(newNotebookContent);
-        // --- END: DEFINITIVE FIX ---
+        setIsDirty(true);
       },
     });
 
+    // CHANGED: Read currentPage fresh from store in the click handler
     editor.onMouseDown((e) => {
-      /* ... (click handler unchanged) ... */
-    });
-    editor.onMouseDown((e) => {
-      if (!currentPage) return; // Disable gutter clicks in welcome mode
-      if (
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN &&
-        e.target.position
-      ) {
+      // CHANGED: Get currentPage fresh from the store, not from closure
+      const currentPage = useSessionStore.getState().currentPage;
+
+      log(
+        `Mouse down - currentPage exists: ${!!currentPage}, targetType: ${
+          e.target.type
+        }`
+      );
+
+      if (!currentPage || !e.target.position) {
+        log("Early return - no currentPage or no position");
+        return;
+      }
+
+      if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
         const lineNumber = e.target.position.lineNumber;
         const model = editor.getModel();
         if (!model) return;
+
+        log(`Glyph margin clicked on line ${lineNumber}`);
+
+        // Handle "Run All" button on line 1
         if (lineNumber === 1) {
+          log(`Running all blocks`);
           handleRunPage();
           return;
         }
+
         const lineText = model.getLineContent(lineNumber);
-        if (lineText.startsWith("```yaml")) {
+
+        // Check if this is a YAML block start
+        if (lineText.trim().startsWith("```yaml")) {
+          log(`Found YAML block start on line ${lineNumber}`);
           let blockId: string | null = null;
+          let isCxBlock = false;
+
+          // Scan the next few lines to find the block ID and confirm it's a cx_block
           for (
             let j = lineNumber + 1;
             j < lineNumber + 10 && j <= model.getLineCount();
             j++
           ) {
             const innerLine = model.getLineContent(j);
-            if (innerLine.startsWith("```")) break;
+
+            if (innerLine.trim().startsWith("```")) break;
+
+            // Check for cx_block flag
+            if (innerLine.includes("cx_block: true")) {
+              isCxBlock = true;
+              log(`Found cx_block flag at line ${j}`);
+            }
+
             const match = innerLine.match(/^\s*id:\s*(\S+)/);
             if (match) {
               blockId = match[1];
-              break;
+              log(`Found block ID: ${blockId}`);
             }
+
+            // Once we have both, we can stop
+            if (blockId && isCxBlock) break;
           }
-          if (blockId) {
+
+          // Only run if we found a valid cx_block with an ID
+          if (blockId && isCxBlock) {
+            log(`Calling handleRunBlock with: ${blockId}`);
             handleRunBlock(blockId);
+          } else {
+            log(`Not running - blockId: ${blockId}, isCxBlock: ${isCxBlock}`);
           }
         }
       }
+    });
+
+    editor.onDidChangeModelContent(() => {
+      setIsDirty(true);
     });
   };
 
@@ -272,19 +329,17 @@ export default function DocumentView() {
   return (
     <>
       <Box
-        // This container is now simpler, just providing the border
         className="border-t border-gray-200 dark:border-gray-800"
-        style={{ height: "calc(100vh - 50px)" }} // Adjust height to fill space below TopBar
+        style={{ height: "calc(100vh - 50px)" }}
       >
         <Editor
-          height="100%" // Editor now fills this container
+          height="100%"
           language="markdown"
           value={content}
           theme="light"
           onMount={handleEditorDidMount}
           options={{
             readOnly: !currentPage,
-            // minimap: { enabled: !currentPage ? false : true },
             minimap: { enabled: false },
             fontSize: 14,
             wordWrap: "on",
@@ -298,8 +353,6 @@ export default function DocumentView() {
           }}
         />
       </Box>
-
-      {/* Portals are now the only other thing rendered */}
       {currentPage && outputPortals}
       {currentPage && foldingPortals}
     </>

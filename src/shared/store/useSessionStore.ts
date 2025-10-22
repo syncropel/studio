@@ -1,10 +1,13 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/shared/store/useSessionStore.ts
 import { create } from "zustand";
-import { BlockResult, ContextualPage } from "../types/notebook";
+import { persist } from "zustand/middleware";
+import { BlockResult, ContextualPage, Block } from "../types/notebook";
 import {
   InboundMessage,
   WorkspaceBrowseResultFields,
   HomepageDataResultFields,
   InspectedArtifact,
+  PageStatusFields,
 } from "../api/types";
 
 export interface AssetTreeNode {
@@ -36,6 +39,11 @@ const updateTreeDataWithChildren = (
 
 export type PageParameters = Record<string, any>;
 
+/**
+ * Manages the state for the active user session. This includes the currently
+ * loaded notebook, block results, and workspace data.
+ * It is persisted to localStorage for session recovery.
+ */
 interface SessionStore {
   // --- STATE ---
   connections: any[];
@@ -50,8 +58,9 @@ interface SessionStore {
   pageParameters: PageParameters;
   blockResults: Record<string, BlockResult | undefined>;
   selectedBlockId: string | null;
-  inspectedArtifacts: InspectedArtifact[]; // For the "Data Tray" / Inspector
+  inspectedArtifacts: InspectedArtifact[];
   isDirty: boolean;
+  pageRunStatus: PageStatusFields | null;
 
   // --- ACTIONS ---
   setLastJsonMessage: (message: InboundMessage | null) => void;
@@ -66,8 +75,6 @@ interface SessionStore {
   setSelectedBlockId: (blockId: string | null) => void;
   updateBlockContent: (blockId: string, newContent: string) => void;
   updatePageParameter: (key: string, value: any) => void;
-
-  // New actions for output and inspector management
   addInspectedArtifact: (artifact: InspectedArtifact) => void;
   removeInspectedArtifact: (id: string) => void;
   clearBlockResult: (blockId: string) => void;
@@ -76,6 +83,11 @@ interface SessionStore {
   updatePageMetadata: (
     metadata: Partial<{ name: string; description: string }>
   ) => void;
+  setIsDirty: (isDirty: boolean) => void;
+  setClean: () => void;
+  setSavedPage: (pageId: string, pageName: string) => void;
+  updateBlockMetadata: (blockId: string, metadata: Partial<Block>) => void;
+  setPageRunStatus: (status: PageStatusFields | null) => void;
 }
 
 const initialState = {
@@ -93,112 +105,149 @@ const initialState = {
   selectedBlockId: null,
   inspectedArtifacts: [],
   isDirty: false,
+  pageRunStatus: null,
 };
 
-export const useSessionStore = create<SessionStore>((set) => ({
-  ...initialState,
+export const useSessionStore = create<SessionStore>()(
+  persist(
+    (set, get) => ({
+      ...initialState,
 
-  // --- ACTION IMPLEMENTATIONS ---
-  setLastJsonMessage: (message) => set({ lastJsonMessage: message }),
-  setCurrentPage: (page) => {
-    const initialParams: PageParameters = {};
-    if (page?.inputs) {
-      for (const key in page.inputs) {
-        if (page.inputs[key].default !== undefined) {
-          initialParams[key] = page.inputs[key].default;
+      setLastJsonMessage: (message) => set({ lastJsonMessage: message }),
+      setCurrentPage: (page) => {
+        const initialParams: PageParameters = {};
+        if (page?.inputs) {
+          for (const key in page.inputs) {
+            if (page.inputs[key].default !== undefined) {
+              initialParams[key] = page.inputs[key].default;
+            }
+          }
         }
-      }
+        set({
+          currentPage: page,
+          blockResults: {},
+          selectedBlockId: null,
+          pageParameters: initialParams,
+          inspectedArtifacts: [],
+          isDirty: page?.id?.startsWith("local-") ?? false,
+          pageRunStatus: null,
+        });
+      },
+      setBlockResult: (blockId, result) =>
+        set((state) => ({
+          blockResults: { ...state.blockResults, [blockId]: result },
+        })),
+      setConnections: (connections) => set({ connections }),
+      setVariables: (variables) => set({ variables }),
+      setIsWorkspaceLoading: (isLoading) =>
+        set({ isWorkspaceLoading: isLoading }),
+      setIsHomepageLoading: (isLoading) =>
+        set({ isHomepageLoading: isLoading }),
+      setHomepageData: (data) =>
+        set({ homepageData: data, isHomepageLoading: false }),
+      handleWorkspaceBrowseResult: (payload) =>
+        set((state) => {
+          const { path, data } = payload;
+          if (path === "/") {
+            return {
+              projectsTreeData: data.projects || [],
+              libraryTreeData: data.library || [],
+              isWorkspaceLoading: false,
+            };
+          } else {
+            const nodes = Array.isArray(data) ? (data as any[]) : [];
+            return {
+              projectsTreeData: updateTreeDataWithChildren(
+                state.projectsTreeData,
+                path,
+                nodes
+              ),
+              libraryTreeData: updateTreeDataWithChildren(
+                state.libraryTreeData,
+                path,
+                nodes
+              ),
+            };
+          }
+        }),
+      setSelectedBlockId: (blockId) => set({ selectedBlockId: blockId }),
+      updateBlockContent: (blockId, newContent) =>
+        set((state) => {
+          if (!state.currentPage) return {};
+          const newBlocks = state.currentPage.blocks.map((block) =>
+            block.id === blockId ? { ...block, content: newContent } : block
+          );
+          return {
+            currentPage: { ...state.currentPage, blocks: newBlocks },
+            isDirty: true,
+          };
+        }),
+      updatePageParameter: (key, value) =>
+        set((state) => ({
+          pageParameters: { ...state.pageParameters, [key]: value },
+          isDirty: true,
+        })),
+      addInspectedArtifact: (artifact) =>
+        set((state) => ({
+          inspectedArtifacts: [
+            ...state.inspectedArtifacts.filter((a) => a.id !== artifact.id),
+            artifact,
+          ],
+        })),
+      removeInspectedArtifact: (id) =>
+        set((state) => ({
+          inspectedArtifacts: state.inspectedArtifacts.filter(
+            (a) => a.id !== id
+          ),
+        })),
+      clearBlockResult: (blockId) =>
+        set((state) => {
+          const { [blockId]: _, ...remainingResults } = state.blockResults;
+          return { blockResults: remainingResults };
+        }),
+      clearAllBlockResults: () =>
+        set({ blockResults: {}, pageRunStatus: null }),
+      reset: () => {
+        set(initialState);
+        // On a full reset (like discarding a session), we must also clear the persisted storage.
+        localStorage.removeItem("syncropel-session-recovery");
+      },
+      updatePageMetadata: (metadata) =>
+        set((state) => ({
+          currentPage: state.currentPage
+            ? { ...state.currentPage, ...metadata }
+            : null,
+          isDirty: true,
+        })),
+      setIsDirty: (isDirty) => set({ isDirty }),
+      setClean: () => set({ isDirty: false }),
+      setSavedPage: (pageId, pageName) =>
+        set((state) => ({
+          isDirty: false,
+          currentPage: state.currentPage
+            ? { ...state.currentPage, id: pageId, name: pageName }
+            : null,
+        })),
+      updateBlockMetadata: (blockId, metadata) =>
+        set((state) => {
+          if (!state.currentPage) return {};
+          const newBlocks = state.currentPage.blocks.map((block) =>
+            block.id === blockId ? { ...block, ...metadata } : block
+          );
+          return {
+            currentPage: { ...state.currentPage, blocks: newBlocks },
+            isDirty: true,
+          };
+        }),
+      setPageRunStatus: (status) => set({ pageRunStatus: status }),
+    }),
+    {
+      name: "syncropel-session-recovery",
+      partialize: (state) => ({
+        currentPage: state.currentPage,
+        pageParameters: state.pageParameters,
+        isDirty: state.isDirty,
+      }),
     }
-    set({
-      currentPage: page,
-      blockResults: {},
-      selectedBlockId: null,
-      pageParameters: initialParams,
-      inspectedArtifacts: [], // Also clear pinned items on page change
-    });
-  },
-  setBlockResult: (blockId, result) =>
-    set((state) => ({
-      blockResults: { ...state.blockResults, [blockId]: result },
-    })),
-  setConnections: (connections) => set({ connections }),
-  setVariables: (variables) => set({ variables }),
-  setIsWorkspaceLoading: (isLoading) => set({ isWorkspaceLoading: isLoading }),
-  setIsHomepageLoading: (isLoading) => set({ isHomepageLoading: isLoading }),
-  setHomepageData: (data) =>
-    set({ homepageData: data, isHomepageLoading: false }),
-  handleWorkspaceBrowseResult: (payload) =>
-    set((state) => {
-      const { path, data } = payload;
-      if (path === "/") {
-        return {
-          projectsTreeData: data.projects || [],
-          libraryTreeData: data.library || [],
-          isWorkspaceLoading: false,
-        };
-      } else {
-        const nodes = Array.isArray(data) ? (data as any[]) : [];
-        if (path.startsWith("library/")) {
-          return {
-            libraryTreeData: updateTreeDataWithChildren(
-              state.libraryTreeData,
-              path,
-              nodes
-            ),
-          };
-        } else {
-          return {
-            projectsTreeData: updateTreeDataWithChildren(
-              state.projectsTreeData,
-              path,
-              nodes
-            ),
-          };
-        }
-      }
-    }),
-  setSelectedBlockId: (blockId) => set({ selectedBlockId: blockId }),
-  updateBlockContent: (blockId, newContent) =>
-    set((state) => {
-      if (!state.currentPage) return {};
-      const newBlocks = state.currentPage.blocks.map((block) =>
-        block.id === blockId ? { ...block, content: newContent } : block
-      );
-      return {
-        currentPage: { ...state.currentPage, blocks: newBlocks },
-        isDirty: true,
-      };
-    }),
-  updatePageParameter: (key, value) =>
-    set((state) => ({
-      pageParameters: { ...state.pageParameters, [key]: value },
-    })),
-
-  // --- NEW ACTION IMPLEMENTATIONS ---
-  addInspectedArtifact: (artifact) =>
-    set((state) => ({
-      inspectedArtifacts: [
-        ...state.inspectedArtifacts.filter((a) => a.id !== artifact.id),
-        artifact,
-      ],
-    })),
-  removeInspectedArtifact: (id) =>
-    set((state) => ({
-      inspectedArtifacts: state.inspectedArtifacts.filter((a) => a.id !== id),
-    })),
-  clearBlockResult: (blockId) =>
-    set((state) => {
-      const { [blockId]: _, ...remainingResults } = state.blockResults;
-      return { blockResults: remainingResults };
-    }),
-  clearAllBlockResults: () => set({ blockResults: {} }),
-
-  reset: () => set(initialState),
-  updatePageMetadata: (metadata) =>
-    set((state) => ({
-      currentPage: state.currentPage
-        ? { ...state.currentPage, ...metadata }
-        : null,
-      isDirty: true,
-    })),
-}));
+  )
+);

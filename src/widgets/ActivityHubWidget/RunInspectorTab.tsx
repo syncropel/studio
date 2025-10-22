@@ -1,3 +1,4 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/widgets/ActivityHubWidget/RunInspectorTab.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -11,13 +12,13 @@ import {
   Badge,
   Loader,
   Center,
+  Code,
 } from "@mantine/core";
 import { IconFilter, IconDownload, IconEye } from "@tabler/icons-react";
 import { useWebSocket } from "@/shared/providers/WebSocketProvider";
 import { useSessionStore } from "@/shared/store/useSessionStore";
 import { nanoid } from "nanoid";
-import { RunDetail } from "@/shared/api/types";
-// --- Import the type from our central location ---
+import { RunDetail, RunDetailResultFields } from "@/shared/api/types";
 
 interface RunInspectorTabProps {
   runId: string;
@@ -47,18 +48,16 @@ export default function RunInspectorTab({
       lastJsonMessage?.command_id === `get-run-detail-${runId}` &&
       lastJsonMessage.type === "RUN_DETAIL_RESULT"
     ) {
-      const payload = lastJsonMessage.payload;
+      const fields = lastJsonMessage.payload.fields as
+        | RunDetailResultFields
+        | undefined;
 
-      // This type guard now works correctly because TypeScript knows RunDetail is a possible payload type.
-      if (payload && typeof payload === "object" && "run_id" in payload) {
-        setRunDetail(payload as RunDetail);
+      if (fields && "run_id" in fields) {
+        setRunDetail(fields);
       } else {
-        console.error(
-          `Invalid payload received for RUN_DETAIL_RESULT:`,
-          payload
-        );
+        console.error("Invalid payload for RUN_DETAIL_RESULT:", fields);
+        setRunDetail(null);
       }
-
       setIsLoading(false);
     }
   }, [lastJsonMessage, runId]);
@@ -79,18 +78,35 @@ export default function RunInspectorTab({
     );
   }
 
+  const getStatusColor = (status: string) => {
+    const lower = status.toLowerCase();
+    if (lower.includes("success") || lower.includes("complete")) return "green";
+    if (lower.includes("fail") || lower.includes("error")) return "red";
+    return "yellow";
+  };
+
   return (
     <Box p="md">
-      <Title order={4} mt="md">
-        Run Details:{" "}
-        <Text span ff="monospace" fw={400}>
-          {runDetail.run_id}
-        </Text>
-      </Title>
+      <Group justify="space-between" align="center">
+        <Title order={4}>
+          Run Details:{" "}
+          <Text span ff="monospace" fw={400} size="sm">
+            {runDetail.run_id}
+          </Text>
+        </Title>
+        <Button
+          variant="light"
+          size="xs"
+          onClick={() => onFilterLogs(`{run_id="${runId}"}`)}
+          leftSection={<IconFilter size={14} />}
+        >
+          View All Logs for this Run
+        </Button>
+      </Group>
 
-      <SimpleGrid cols={2} mt="md">
+      <SimpleGrid cols={2} mt="lg" spacing="xs">
         <Text fw={500}>Status:</Text>
-        <Badge color={runDetail.status.includes("Success") ? "green" : "red"}>
+        <Badge color={getStatusColor(runDetail.status)}>
           {runDetail.status}
         </Badge>
         <Text fw={500}>Flow:</Text>
@@ -109,20 +125,28 @@ export default function RunInspectorTab({
           className="p-2 border-b border-gray-200 dark:border-gray-800"
         >
           <Text size="sm">
-            {step.status} {step.id}{" "}
+            <Badge
+              size="xs"
+              variant="outline"
+              color={getStatusColor(step.status)}
+              mr="xs"
+            >
+              {step.status}
+            </Badge>
+            <Code>{step.id}</Code>{" "}
             <Text span c="dimmed">
               ({step.duration_ms}ms)
             </Text>
           </Text>
           <Button
-            variant="light"
+            variant="subtle"
             size="xs"
             onClick={() =>
               onFilterLogs(`{run_id="${runId}", step_id="${step.id}"}`)
             }
             leftSection={<IconFilter size={14} />}
           >
-            View Logs
+            Logs
           </Button>
         </Group>
       ))}
@@ -130,7 +154,7 @@ export default function RunInspectorTab({
       <Title order={5} mt="xl" mb="xs">
         Artifacts
       </Title>
-      {runDetail.artifacts.length > 0 ? (
+      {runDetail.artifacts && runDetail.artifacts.length > 0 ? (
         runDetail.artifacts.map((art) => (
           <Group key={art.name} justify="space-between" className="p-2">
             <Text size="sm">
@@ -144,6 +168,7 @@ export default function RunInspectorTab({
                 variant="subtle"
                 size="xs"
                 leftSection={<IconEye size={14} />}
+                disabled // Preview is a post-MVP feature
               >
                 Preview
               </Button>
@@ -151,6 +176,7 @@ export default function RunInspectorTab({
                 variant="default"
                 size="xs"
                 leftSection={<IconDownload size={14} />}
+                onClick={() => window.open(art.access_url, "_blank")}
               >
                 Download
               </Button>
@@ -158,8 +184,8 @@ export default function RunInspectorTab({
           </Group>
         ))
       ) : (
-        <Text size="sm" c="dimmed">
-          No artifacts produced.
+        <Text size="sm" c="dimmed" p="xs">
+          No artifacts were produced by this run.
         </Text>
       )}
     </Box>

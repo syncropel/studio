@@ -1,22 +1,11 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/widgets/SidebarWidget/index.tsx
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import {
-  Box,
-  ScrollArea,
-  Text,
-  Loader,
-  Group,
-  Title,
-  Tooltip,
-  ActionIcon,
-  UnstyledButton,
-  Center,
-} from "@mantine/core";
+import { Box, ScrollArea, Text, Loader, Center } from "@mantine/core";
 import Tree, { type TreeNodeProps } from "rc-tree";
 import type { EventDataNode, Key } from "rc-tree/lib/interface";
 import {
-  IconBox,
   IconFileCode,
   IconFolder,
   IconChevronDown,
@@ -26,15 +15,11 @@ import {
   IconSettings,
   IconPlug,
   IconVariable,
-  IconHome,
   IconBuildingStore,
-  IconKey,
 } from "@tabler/icons-react";
 import { useSessionStore, AssetTreeNode } from "@/shared/store/useSessionStore";
-import { useUIStateStore } from "@/shared/store/useUIStateStore";
 import { useWebSocket } from "@/shared/providers/WebSocketProvider";
 import { nanoid } from "nanoid";
-import { useRouter } from "next/navigation";
 import { ReadyState } from "react-use-websocket";
 
 import CollapsibleSection from "./CollapsibleSection";
@@ -43,37 +28,24 @@ import ConnectionStatus from "./ConnectionStatus";
 
 interface SidebarWidgetProps {
   onConnectionClick: () => void;
-  disabled?: boolean;
 }
 
 export default function SidebarWidget({
   onConnectionClick,
-  disabled = false,
 }: SidebarWidgetProps) {
-  // --- STATE MANAGEMENT ---
-  // Read shared, global state directly from our sliced Zustand stores.
   const {
     connections,
     variables,
-    setCurrentPage,
     currentPage,
     projectsTreeData,
     libraryTreeData,
     isWorkspaceLoading,
-    setIsWorkspaceLoading, // We also need the setter
   } = useSessionStore();
 
   const { sendJsonMessage, readyState } = useWebSocket();
-  const router = useRouter();
-
-  // Manage UI-specific state (like expanded nodes) locally within the component.
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
-
   const selectedKeys = currentPage?.id ? [currentPage.id] : [];
 
-  // --- DATA FETCHING ---
-  // This simplified effect's only job is to trigger the initial data fetch
-  // when the component mounts and the WebSocket is ready.
   useEffect(() => {
     if (readyState === ReadyState.OPEN && isWorkspaceLoading) {
       sendJsonMessage({
@@ -84,9 +56,6 @@ export default function SidebarWidget({
     }
   }, [readyState, isWorkspaceLoading, sendJsonMessage]);
 
-  // --- UI LOGIC & HANDLERS ---
-
-  // Effect to automatically expand parent folders when a new page is loaded from anywhere.
   useEffect(() => {
     if (currentPage?.id) {
       const getParentKeys = (key: Key): Key[] => {
@@ -106,16 +75,9 @@ export default function SidebarWidget({
     }
   }, [currentPage]);
 
-  const goToHome = () => {
-    setCurrentPage(null);
-    router.push("/");
-  };
-
-  // Callback for lazy-loading child nodes when a user expands a folder.
   const onLoadData = useCallback(
     (treeNode: EventDataNode<AssetTreeNode>): Promise<void> => {
       return new Promise((resolve) => {
-        // Don't re-fetch if children already exist.
         if (treeNode.children && treeNode.children.length > 0) {
           resolve();
           return;
@@ -131,14 +93,12 @@ export default function SidebarWidget({
     [sendJsonMessage]
   );
 
-  // Callback for when a user clicks on any item in the tree.
   const onSelect = useCallback(
     (
       selectedKeys: React.Key[],
       info: { node: EventDataNode<AssetTreeNode> }
     ) => {
       if (info.node.isLeaf) {
-        // If it's a file, send a command to load the page.
         const pageId = info.node.key as string;
         sendJsonMessage({
           type: "PAGE.LOAD",
@@ -146,7 +106,6 @@ export default function SidebarWidget({
           payload: { page_id: pageId },
         });
       } else {
-        // If it's a folder, toggle its expanded state.
         setExpandedKeys((keys) => {
           const key = info.node.key;
           return keys.includes(key)
@@ -158,13 +117,9 @@ export default function SidebarWidget({
     [sendJsonMessage]
   );
 
-  // --- RENDER HELPERS ---
-
   const switcherIcon = (props: TreeNodeProps) => {
-    if (props.isLeaf) return null; // Leaf nodes (files) don't have a switcher.
-    const nodeData = props.data as AssetTreeNode;
-    if (nodeData.isLoadingChildren)
-      return <Loader size={12} className="mr-1" />; // Show loader during lazy-load
+    if (props.isLeaf) return <span className="rc-tree-switcher-noop" />;
+    if ((props.data as any)?.isLoadingChildren) return <Loader size={12} />;
     return props.expanded ? (
       <IconChevronDown size={14} className="text-gray-400" />
     ) : (
@@ -191,17 +146,18 @@ export default function SidebarWidget({
         );
       case "flow":
         return <IconFileCode size={14} className="text-gray-400" />;
-      case "query":
-        return <IconBox size={14} className="text-gray-400" />;
       default:
         return null;
     }
   };
 
   const renderTree = (data: AssetTreeNode[], placeholder: string) => {
-    // This now correctly uses the loading state from the central store.
     if (isWorkspaceLoading && data.length === 0) {
-      return <Loader size="xs" m="md" />;
+      return (
+        <Center>
+          <Loader size="xs" m="md" />
+        </Center>
+      );
     }
     if (data.length > 0) {
       return (
@@ -227,203 +183,135 @@ export default function SidebarWidget({
     );
   };
 
-  // --- MAIN RENDER ---
   return (
-    <aside
-      className={`h-full w-full flex flex-col bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800 transition-opacity`}
-    >
-      <Group
-        justify="space-between"
-        align="center"
-        className="p-2 border-b border-gray-200 dark:border-gray-800 flex-shrink-0"
-      >
-        <Title order={4} className="px-2">
-          Workspace
-        </Title>
-        <Tooltip label="Go to Homepage" position="right" withArrow>
-          <ActionIcon variant="default" onClick={goToHome} size="md">
-            <IconHome size={16} />
-          </ActionIcon>
-        </Tooltip>
-      </Group>
-
-      <ScrollArea
-        className={`flex-grow p-2 transition-opacity ${
-          disabled ? "opacity-50 pointer-events-none" : ""
-        }`}
-      >
-        {disabled ? (
-          <Center h={200}>
-            <Text c="dimmed" size="sm">
-              Connect to a server to view workspace.
-            </Text>
-          </Center>
-        ) : (
-          <div className="minimalist-tree">
-            <style jsx global>{`
-              .minimalist-tree .rc-tree {
-                font-size: 13px;
-                line-height: 1.5;
-              }
-              .minimalist-tree .rc-tree-treenode {
-                display: flex; /* Use flexbox for alignment */
-                align-items: center;
-                padding: 0;
-                margin: 0;
-              }
-              .minimalist-tree .rc-tree-node-content-wrapper {
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-                padding: 5px 8px;
-                margin: 1px 0;
-                border-radius: 6px;
-                cursor: pointer;
-                transition: all 0.15s ease;
-                color: inherit;
-                min-height: 28px;
-                width: 100%;
-                flex-grow: 1; /* Allow content to fill remaining space */
-              }
-              .minimalist-tree .rc-tree-node-content-wrapper:hover {
-                background-color: rgba(0, 0, 0, 0.03);
-              }
-              .minimalist-tree .dark .rc-tree-node-content-wrapper:hover {
-                background-color: rgba(255, 255, 255, 0.05);
-              }
+    <aside className="h-full w-full flex flex-col bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800">
+      {/* The header is removed, and the ScrollArea now takes up the full space */}
+      <ScrollArea className="flex-grow p-2">
+        <div className="minimalist-tree">
+          {/* The CSS-in-JS block remains the same, defining the tree styles */}
+          <style jsx global>{`
+            .minimalist-tree .rc-tree-treenode {
+              display: flex;
+              align-items: center;
+              padding: 0;
+              margin: 0;
+            }
+            .minimalist-tree .rc-tree-node-content-wrapper {
+              display: inline-flex;
+              align-items: center;
+              gap: 6px;
+              padding: 4px 6px;
+              margin: 1px 0;
+              border-radius: 4px;
+              cursor: pointer;
+              transition: background-color 0.15s ease;
+              color: inherit;
+              min-height: 28px;
+              width: 100%;
+            }
+            .minimalist-tree .rc-tree-node-content-wrapper:hover {
+              background-color: var(--mantine-color-gray-1);
+            }
+            .dark .minimalist-tree .rc-tree-node-content-wrapper:hover {
+              background-color: var(--mantine-color-dark-8);
+            }
+            .minimalist-tree
+              .rc-tree-node-content-wrapper.rc-tree-node-selected {
+              background-color: var(
+                --mantine-color-blue-light-hover
+              ) !important;
+              color: var(--mantine-color-blue-7);
+              font-weight: 500;
+            }
+            .dark
               .minimalist-tree
-                .rc-tree-node-content-wrapper.rc-tree-node-selected {
-                background-color: rgba(59, 130, 246, 0.08) !important;
-                color: rgb(59, 130, 246);
-                font-weight: 500;
-              }
-              .minimalist-tree
-                .dark
-                .rc-tree-node-content-wrapper.rc-tree-node-selected {
-                background-color: rgba(59, 130, 246, 0.12) !important;
-              }
+              .rc-tree-node-content-wrapper.rc-tree-node-selected {
+              background-color: var(--mantine-color-dark-6) !important;
+              color: var(--mantine-color-blue-4);
+            }
+            .minimalist-tree .rc-tree-indent-unit {
+              width: 20px;
+            }
+            .minimalist-tree .rc-tree-switcher,
+            .minimalist-tree .rc-tree-switcher-noop {
+              width: 20px;
+              height: 28px;
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              flex-shrink: 0;
+              cursor: pointer;
+            }
+            .minimalist-tree .rc-tree-iconEle {
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              width: 16px;
+              height: 16px;
+              flex-shrink: 0;
+            }
+            .minimalist-tree .rc-tree-title {
+              font-size: 13px;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+          `}</style>
 
-              /* --- START: INDENTATION FIXES --- */
-              .minimalist-tree .rc-tree-indent {
-                display: inline-block;
-                flex-shrink: 0; /* Prevent indent from shrinking */
-              }
-              .minimalist-tree .rc-tree-indent-unit {
-                display: inline-block;
-                width: 20px; /* Explicitly set the width for each indent level */
-              }
-              .minimalist-tree .rc-tree-switcher {
-                width: 20px; /* Give the switcher a fixed width to align items */
-                height: 28px; /* Match the item height for vertical alignment */
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                flex-shrink: 0;
-                cursor: pointer;
-              }
-              .minimalist-tree .rc-tree-switcher-noop {
-                width: 20px; /* Ensure leaf nodes also occupy the same space */
-              }
-              /* --- END: INDENTATION FIXES --- */
-
-              .minimalist-tree .rc-tree-iconEle {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                width: 16px;
-                height: 16px;
-                flex-shrink: 0;
-              }
-              .minimalist-tree .rc-tree-title {
-                display: inline-block;
-                font-size: 13px;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                flex-grow: 1;
-              }
-            `}</style>
-
-            <CollapsibleSection
-              title="Projects"
-              icon={IconFolder}
-              isExpanded={true}
-            >
-              <Box pl={0}>
-                {renderTree(projectsTreeData, "No projects found.")}
-              </Box>
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="Library"
-              icon={IconFolders}
-              isExpanded={true}
-            >
-              <Box pl={0}>
-                {renderTree(libraryTreeData, "No library items found.")}
-              </Box>
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="Session"
-              icon={IconSettings}
-              isExpanded={true}
-            >
-              <Box pl="md" pt="xs">
-                <Text size="xs" fw={500} c="dimmed" mb="xs">
-                  Active Connections
-                </Text>
-                {connections.length > 0 ? (
-                  connections.map((conn) => (
-                    <NavigationItem
-                      key={conn.alias}
-                      title={conn.alias}
-                      icon={IconPlug}
-                    />
-                  ))
-                ) : (
-                  <NavigationItem title="No active connections" isSubtle />
-                )}
-                <Text size="xs" fw={500} c="dimmed" mt="md" mb="xs">
-                  Session Variables
-                </Text>
-                {variables.length > 0 ? (
-                  variables.map((varItem) => (
-                    <NavigationItem
-                      key={varItem.name}
-                      title={varItem.name}
-                      icon={IconVariable}
-                    />
-                  ))
-                ) : (
-                  <NavigationItem title="No session variables" isSubtle />
-                )}
-              </Box>
-            </CollapsibleSection>
-          </div>
-        )}
+          <CollapsibleSection
+            title="Projects"
+            icon={IconFolder}
+            isExpanded={true}
+            noPadding
+          >
+            {renderTree(projectsTreeData, "No projects found.")}
+          </CollapsibleSection>
+          <CollapsibleSection
+            title="Library"
+            icon={IconFolders}
+            isExpanded={true}
+            noPadding
+          >
+            {renderTree(libraryTreeData, "No library items found.")}
+          </CollapsibleSection>
+          <CollapsibleSection
+            title="Session"
+            icon={IconSettings}
+            isExpanded={true}
+          >
+            <Box pt="xs">
+              <Text size="xs" fw={500} c="dimmed" mb="xs">
+                Active Connections
+              </Text>
+              {connections.length > 0 ? (
+                connections.map((conn) => (
+                  <NavigationItem
+                    key={conn.alias}
+                    title={conn.alias}
+                    icon={IconPlug}
+                  />
+                ))
+              ) : (
+                <NavigationItem title="No active connections" isSubtle />
+              )}
+              <Text size="xs" fw={500} c="dimmed" mt="md" mb="xs">
+                Session Variables
+              </Text>
+              {variables.length > 0 ? (
+                variables.map((varItem) => (
+                  <NavigationItem
+                    key={varItem.name}
+                    title={varItem.name}
+                    icon={IconVariable}
+                  />
+                ))
+              ) : (
+                <NavigationItem title="No session variables" isSubtle />
+              )}
+            </Box>
+          </CollapsibleSection>
+        </div>
       </ScrollArea>
-
-      <Box className="border-t border-gray-200 dark:border-gray-800 p-2">
-        <CollapsibleSection
-          title="Settings"
-          icon={IconSettings}
-          isExpanded={false}
-        >
-          <Box pl="md" pt="xs">
-            <UnstyledButton
-              onClick={onConnectionClick}
-              className="w-full p-2 text-left hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
-            >
-              <Group gap="xs">
-                <IconPlug size={14} className="text-gray-500" />
-                <Text size="xs">Manage Connections</Text>
-              </Group>
-            </UnstyledButton>
-            <NavigationItem title="Secrets" icon={IconKey} isSubtle={true} />
-          </Box>
-        </CollapsibleSection>
-      </Box>
       <ConnectionStatus onClick={onConnectionClick} />
     </aside>
   );

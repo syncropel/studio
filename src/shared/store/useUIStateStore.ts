@@ -4,23 +4,33 @@ import React from "react";
 
 export type FoldingCommand = "collapseAll" | "expandAll" | "collapseCode";
 
+/**
+ * Defines the shape for a generic modal that can be opened from anywhere in the app.
+ * The content is a ReactNode, allowing any component to be rendered inside.
+ */
 interface ModalState {
   title: string;
   content: React.ReactNode;
+  size?: string | number; // Optional size prop for Mantine Modal
 }
 
+/**
+ * This store manages transient UI state that should NOT be persisted.
+ * It's responsible for the visibility of modals, drawers, and other temporary UI elements.
+ * It also acts as a "command bus" for cross-component communication using simple triggers.
+ */
 interface UIStateStore {
   // --- STATE ---
   isSpotlightVisible: boolean;
   isConnectionManagerOpen: boolean;
-  isNavDrawerOpen: boolean;
-  isInspectorDrawerOpen: boolean;
-  foldingCommand: FoldingCommand | null;
-  modalState: ModalState | null;
-
-  // NEW: State to track which inline forms are visible.
-  activeFormWidgetIds: Set<string>;
-  showCommandPalette: boolean;
+  isNavDrawerOpen: boolean; // Mobile-only
+  isInspectorDrawerOpen: boolean; // Mobile-only
+  foldingCommand: FoldingCommand | null; // Command for the Monaco editor
+  modalState: ModalState | null; // State for the generic modal
+  activeFormWidgetIds: Set<string>; // IDs of visible inline forms in the editor
+  showCommandPalette: boolean; // Trigger for Monaco's command palette
+  saveTrigger: number; // A counter that increments to signal a save action
+  runAllTrigger: number; // A counter that increments to signal a "Run All" action
 
   // --- ACTIONS ---
   openSpotlight: () => void;
@@ -31,14 +41,12 @@ interface UIStateStore {
   setFoldingCommand: (command: FoldingCommand | null) => void;
   openModal: (state: ModalState) => void;
   closeModal: () => void;
-
-  // NEW: Action to toggle the visibility of a specific form.
   toggleFormWidget: (widgetId: string) => void;
-  // NEW: Action to close all forms (useful on page change).
   closeAllFormWidgets: () => void;
   triggerCommandPalette: () => void;
-  // NEW: Action to reset the trigger
   resetCommandPalette: () => void;
+  triggerSave: () => void;
+  triggerRunAll: () => void;
 }
 
 export const useUIStateStore = create<UIStateStore>((set) => ({
@@ -49,11 +57,12 @@ export const useUIStateStore = create<UIStateStore>((set) => ({
   isInspectorDrawerOpen: false,
   foldingCommand: null,
   modalState: null,
-  showCommandPalette: false,
-
   activeFormWidgetIds: new Set(),
+  showCommandPalette: false,
+  saveTrigger: 0,
+  runAllTrigger: 0,
 
-  // Actions
+  // --- ACTION IMPLEMENTATIONS ---
   openSpotlight: () => set({ isSpotlightVisible: true }),
   closeSpotlight: () => set({ isSpotlightVisible: false }),
   toggleConnectionManager: (open) =>
@@ -74,7 +83,6 @@ export const useUIStateStore = create<UIStateStore>((set) => ({
   openModal: (state) => set({ modalState: state }),
   closeModal: () => set({ modalState: null }),
 
-  // --- NEW ACTION IMPLEMENTATIONS ---
   toggleFormWidget: (widgetId) =>
     set((state) => {
       const newSet = new Set(state.activeFormWidgetIds);
@@ -89,4 +97,7 @@ export const useUIStateStore = create<UIStateStore>((set) => ({
   closeAllFormWidgets: () => set({ activeFormWidgetIds: new Set() }),
   triggerCommandPalette: () => set({ showCommandPalette: true }),
   resetCommandPalette: () => set({ showCommandPalette: false }),
+  triggerSave: () => set((state) => ({ saveTrigger: state.saveTrigger + 1 })),
+  triggerRunAll: () =>
+    set((state) => ({ runAllTrigger: state.runAllTrigger + 1 })),
 }));

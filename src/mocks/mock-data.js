@@ -1236,6 +1236,44 @@ LINE 1: SELECT * FROM a_table_that_does_not_exist;`,
 // required by the single-instance Monaco editor architecture.
 
 export const MOCK_RAW_PAGE_CONTENT = {
+  "my-project/simple-report": `---
+name: Simple GitHub User Report
+description: Fetches a user profile from GitHub.
+inputs:
+  username:
+    description: The GitHub username to look up.
+    type: string
+    required: true
+    default: torvalds
+---
+
+## GitHub User Report
+
+This notebook fetches the public profile for a GitHub user. The current target is **{{ inputs.username }}**.
+
+\`\`\`yaml
+cx_block: true
+id: simple_report_fetch_user
+engine: run
+name: Fetch User Profile
+connection_source: user:github
+inputs:
+  - inputs.username
+outputs:
+  - user_data
+\`\`\`
+\`\`\`yaml
+action: run_declarative_action
+template_key: getUser
+context:
+  username: "{{ inputs.username }}"
+\`\`\`
+
+### Summary
+
+- **Name**: {{ steps.simple_report_fetch_user.outputs.user_data.name }}
+- **Followers**: {{ steps.simple_report_fetch_user.outputs.user_data.followers }}
+`,
   // ----------------------------------------------------------------------
   //   Raw content for `finance-project/monthly-billing`
   // ----------------------------------------------------------------------
