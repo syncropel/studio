@@ -27,8 +27,11 @@ import { useConnectionStore } from "@/shared/store/useConnectionStore";
 import { useWebSocket } from "@/shared/providers/WebSocketProvider";
 import type { HomepageItem } from "@/widgets/Spotlight";
 
+// --- START: ARCHITECTURAL REFACTOR ---
+// Import the new, decoupled sidebar components
 import TopBar from "@/widgets/TopBar";
-import SidebarWidget from "@/widgets/SidebarWidget";
+import ActivityBar from "@/widgets/ActivityBar";
+import SidebarPanel from "@/widgets/SidebarPanel";
 import Notebook from "@/widgets/Notebook";
 import InspectorWidget from "@/widgets/InspectorWidget";
 import ActivityHubWidget from "@/widgets/ActivityHubWidget";
@@ -37,6 +40,7 @@ import BottomActionBar from "@/widgets/BottomActionBar";
 import ConnectionManager from "@/widgets/ConnectionManager";
 import SessionRecoveryModal from "@/widgets/SessionRecoveryModal";
 import ConnectionStatusIndicator from "@/widgets/ConnectionStatusIndicator";
+// --- END: ARCHITECTURAL REFACTOR ---
 
 export default function StudioClientRoot() {
   const router = useRouter();
@@ -67,6 +71,10 @@ export default function StudioClientRoot() {
   const { sendJsonMessage, readyState, isReconnecting } = useWebSocket();
   const activeProfile = getActiveProfile();
   const isConnected = readyState === ReadyState.OPEN;
+
+  // All hooks and handlers below this point are UNCHANGED.
+  // The beauty of this refactor is that the core logic of the
+  // application remains the same; only the layout composition changes.
 
   useEffect(() => {
     if (isClient) {
@@ -132,7 +140,6 @@ export default function StudioClientRoot() {
   };
 
   const renderMainContent = () => {
-    // If no profile is active, we are in the welcome state.
     if (!activeProfile) {
       return (
         <Center h="100%" className="p-4">
@@ -149,7 +156,6 @@ export default function StudioClientRoot() {
       );
     }
 
-    // If a profile is active, we use the readyState to determine the UI.
     switch (readyState) {
       case ReadyState.CONNECTING:
         return (
@@ -200,7 +206,6 @@ export default function StudioClientRoot() {
           </Center>
         );
       default:
-        // Fallback for CLOSING, UNINSTANTIATED states
         return (
           <Center h="100%">
             <Loader />
@@ -217,6 +222,8 @@ export default function StudioClientRoot() {
     );
   }
 
+  // --- START: RENDER LOGIC REFACTOR ---
+  // The JSX is now cleaner and uses the new decoupled components.
   return (
     <main className="relative h-screen w-screen flex flex-col bg-white dark:bg-gray-950 text-black dark:text-white overflow-hidden">
       <SessionRecoveryModal
@@ -229,6 +236,7 @@ export default function StudioClientRoot() {
           "your previous session"
         }
       />
+
       <Modal
         opened={isSpotlightVisible}
         onClose={closeSpotlight}
@@ -244,6 +252,7 @@ export default function StudioClientRoot() {
           <Spotlight onItemClick={handleSpotlightItemClick} />
         </Box>
       </Modal>
+
       <Modal
         opened={isConnectionManagerOpen}
         onClose={() => toggleConnectionManager(false)}
@@ -253,6 +262,7 @@ export default function StudioClientRoot() {
       >
         <ConnectionManager />
       </Modal>
+
       <Modal
         opened={!!modalState}
         onClose={closeModal}
@@ -272,9 +282,8 @@ export default function StudioClientRoot() {
             padding={0}
             size="85%"
           >
-            <SidebarWidget
-              onConnectionClick={() => toggleConnectionManager(true)}
-            />
+            {/* The Mobile Drawer now contains the full SidebarPanel, which is more powerful */}
+            <SidebarPanel />
           </Drawer>
           <Drawer
             opened={isInspectorDrawerOpen}
@@ -301,9 +310,11 @@ export default function StudioClientRoot() {
               {!isMobile && isConnected && (
                 <>
                   <Panel defaultSize={20} minSize={15} maxSize={40}>
-                    <SidebarWidget
-                      onConnectionClick={() => toggleConnectionManager(true)}
-                    />
+                    {/* The old SidebarWidget is replaced with our new two-part layout */}
+                    <Box className="flex h-full w-full">
+                      <ActivityBar />
+                      <SidebarPanel />
+                    </Box>
                   </Panel>
                   <PanelResizeHandle className="w-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 transition-colors" />
                 </>
@@ -333,4 +344,5 @@ export default function StudioClientRoot() {
       {isMobile && currentPage && <BottomActionBar />}
     </main>
   );
+  // --- END: RENDER LOGIC REFACTOR ---
 }

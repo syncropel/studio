@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import {
+  Box,
   Text,
   Loader,
   Center,
@@ -11,29 +12,23 @@ import {
   Group,
   Stack,
   TextInput,
-  Pill,
-  Select,
-  ActionIcon,
-  Divider,
-  Box,
   ScrollArea,
+  ActionIcon,
+  MantineColor,
 } from "@mantine/core";
 import {
-  IconFilter,
-  IconRefresh,
-  IconDownload,
-  IconSettings,
   IconSearch,
-  IconPlayerPlay,
-  IconClock,
+  IconRefresh,
   IconCheck,
   IconX,
+  IconClock,
 } from "@tabler/icons-react";
 import { useWebSocket } from "@/shared/providers/WebSocketProvider";
 import { useSessionStore } from "@/shared/store/useSessionStore";
+import { useArtifactQuery } from "@/shared/hooks/useArtifactQuery";
 import { nanoid } from "nanoid";
 import { ReadyState } from "react-use-websocket";
-import { RunHistoryItem, RunHistoryResultFields } from "@/shared/api/types";
+import { RunHistoryItem, DataRef } from "@/shared/api/types";
 
 interface RunsTabProps {
   onViewDetails: (runId: string) => void;
@@ -41,235 +36,211 @@ interface RunsTabProps {
 }
 
 type RunStatus = "success" | "failed" | "pending" | "running";
-type DateRange = "all" | "today" | "yesterday" | "7days" | "30days";
 
-interface RunFilters {
-  searchText: string;
-  statuses: Set<RunStatus>;
-  flowId: string | null;
-  dateRange: DateRange;
-}
+// --- Helper Functions ---
+
+const normalizeStatus = (status: string): RunStatus => {
+  if (!status) return "pending";
+  const lower = status.toLowerCase();
+  if (
+    lower.includes("success") ||
+    lower.includes("complete") ||
+    lower.includes("✅")
+  )
+    return "success";
+  if (lower.includes("fail") || lower.includes("error") || lower.includes("❌"))
+    return "failed";
+  if (
+    lower.includes("running") ||
+    lower.includes("in progress") ||
+    lower.includes("🔄")
+  )
+    return "running";
+  return "pending";
+};
+
+const getStatusColor = (status: RunStatus): MantineColor => {
+  if (status === "success") return "green";
+  if (status === "failed") return "red";
+  return "yellow";
+};
+
+const getStatusIcon = (status: RunStatus) => {
+  if (status === "success") return <IconCheck size={14} />;
+  if (status === "failed") return <IconX size={14} />;
+  return <IconClock size={14} />;
+};
+
+const getRelativeTime = (timestamp: string): string => {
+  const diffMs = new Date().getTime() - new Date(timestamp).getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMs / 3600000);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return new Date(timestamp).toLocaleDateString();
+};
 
 export default function RunsTab({ onViewDetails, onFilterLogs }: RunsTabProps) {
-  const [runs, setRuns] = useState<RunHistoryItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [filters, setFilters] = useState<RunFilters>({
-    searchText: "",
-    statuses: new Set<RunStatus>(),
-    flowId: null,
-    dateRange: "all",
-  });
+  // --- DATA FETCHING LOGIC ---
+  // 1. We hold the "claim check" (DataRef) in local state.
+  const [dataRef, setDataRef] = useState<DataRef | null>(null);
 
+  // 1. Conditionally enable the query.
+  // 2. Pass a valid-but-empty DataRef when it's null to prevent the hook from crashing.
+  const {
+    data: runs,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isRefetching,
+  } = useArtifactQuery(
+    dataRef || { artifact_id: "", access_url: "", renderer_hint: "" }, // Provide a dummy object
+    !!dataRef // The hook is only enabled when dataRef is NOT null.
+  );
   const { sendJsonMessage, readyState } = useWebSocket();
   const { lastJsonMessage } = useSessionStore();
 
-  const fetchRuns = useCallback(() => {
+  // A stable ID for this component instance to correlate WebSocket messages.
+  const commandId = useMemo(() => `history-query-${nanoid()}`, []);
+
+  // 3. This function sends the command to the server to *get the DataRef*.
+  const fetchRunHistoryRef = useCallback(() => {
     if (readyState === ReadyState.OPEN) {
-      setIsLoading(true);
       sendJsonMessage({
-        type: "GET_RUN_HISTORY",
-        command_id: `get-runs-${nanoid()}`,
-        payload: {},
+        type: "HISTORY.QUERY",
+        command_id: commandId,
+        payload: { limit: 100 }, // A sensible default limit
       });
     }
-  }, [readyState, sendJsonMessage]);
+  }, [readyState, sendJsonMessage, commandId]);
 
+  // 4. Trigger the initial fetch when the component mounts.
   useEffect(() => {
-    if (readyState === ReadyState.OPEN) {
-      fetchRuns();
-    }
-  }, [readyState, fetchRuns]);
+    fetchRunHistoryRef();
+  }, [fetchRunHistoryRef]);
 
+  // 5. Listen for the WebSocket response that contains the DataRef.
   useEffect(() => {
-    if (lastJsonMessage?.type === "RUN_HISTORY_RESULT") {
-      const receivedRuns = lastJsonMessage.payload.fields as
-        | RunHistoryResultFields
+    if (
+      lastJsonMessage?.type === "HISTORY.QUERY_RESULT" &&
+      lastJsonMessage.command_id === commandId
+    ) {
+      const receivedDataRef = lastJsonMessage.payload.fields as
+        | DataRef
         | undefined;
-      if (Array.isArray(receivedRuns)) {
-        const sortedRuns = [...receivedRuns].sort(
-          (a, b) =>
-            new Date(b.timestamp_utc).getTime() -
-            new Date(a.timestamp_utc).getTime()
-        );
-        setRuns(sortedRuns);
-      } else {
-        console.error(
-          "Received RUN_HISTORY_RESULT but payload was not a valid array:",
-          receivedRuns
-        );
+      if (receivedDataRef) {
+        setDataRef(receivedDataRef); // This enables the useArtifactQuery hook to start fetching.
       }
-      setIsLoading(false);
     }
-  }, [lastJsonMessage]);
+  }, [lastJsonMessage, commandId]);
 
-  useEffect(() => {
-    if (!autoRefresh) return;
-    const interval = setInterval(() => fetchRuns(), 10000);
-    return () => clearInterval(interval);
-  }, [autoRefresh, fetchRuns]);
+  // 6. Sort the data once it's fetched by React Query.
+  const sortedRuns = useMemo(() => {
+    if (!runs || !Array.isArray(runs)) return [];
+    return [...(runs as RunHistoryItem[])].sort(
+      (a, b) =>
+        new Date(b.timestamp_utc).getTime() -
+        new Date(a.timestamp_utc).getTime()
+    );
+  }, [runs]);
 
-  const normalizeStatus = (status: string): RunStatus => {
-    const lower = status.toLowerCase();
-    if (lower.includes("success") || lower.includes("complete"))
-      return "success";
-    if (lower.includes("fail") || lower.includes("error")) return "failed";
-    if (lower.includes("running")) return "running";
-    return "pending";
-  };
+  // --- RENDER LOGIC ---
 
-  const formatParameters = (params: Record<string, any>): string => {
-    const entries = Object.entries(params);
-    if (entries.length === 0) return "no params";
-    return entries
-      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-      .join(", ");
-  };
-
-  const getRelativeTime = (timestamp: string): string => {
-    const diffMs = new Date().getTime() - new Date(timestamp).getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return "just now";
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMs / 3600000);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return new Date(timestamp).toLocaleDateString();
-  };
-
-  const filteredRuns = useMemo(() => {
-    return runs.filter((run) => {
-      if (
-        filters.statuses.size > 0 &&
-        !filters.statuses.has(normalizeStatus(run.status))
-      )
-        return false;
-      if (filters.flowId && run.flow_id !== filters.flowId) return false;
-      // Date range and search text filters can be added here
-      return true;
-    });
-  }, [runs, filters]);
-
-  const uniqueFlows = useMemo(
-    () => Array.from(new Set(runs.map((r) => r.flow_id))).sort(),
-    [runs]
-  );
-
-  const toggleStatusFilter = (status: RunStatus) => {
-    setFilters((prev) => {
-      const newStatuses = new Set(prev.statuses);
-      newStatuses.has(status)
-        ? newStatuses.delete(status)
-        : newStatuses.add(status);
-      return { ...prev, statuses: newStatuses };
-    });
-  };
-
-  if (isLoading)
+  if (isLoading && !runs) {
     return (
-      <Center h={100}>
+      <Center h={200}>
         <Loader />
       </Center>
     );
-  if (runs.length === 0)
+  }
+
+  if (isError) {
     return (
-      <Center h={100}>
-        <Text c="dimmed">No run history found.</Text>
+      <Center h={200}>
+        <Text c="red">Error fetching run history: {error.message}</Text>
       </Center>
     );
-
-  const renderRunCard = (run: RunHistoryItem) => {
-    const status = normalizeStatus(run.status);
-    const borderColor =
-      status === "success" ? "green" : status === "failed" ? "red" : "yellow";
-    const statusIcon =
-      status === "success" ? (
-        <IconCheck size={14} />
-      ) : status === "failed" ? (
-        <IconX size={14} />
-      ) : (
-        <IconClock size={14} />
-      );
-
-    return (
-      <Box
-        key={run.run_id}
-        p="sm"
-        mb="xs"
-        style={{
-          borderLeft: `3px solid var(--mantine-color-${borderColor}-6)`,
-        }}
-      >
-        <Group justify="space-between">
-          <Box>
-            <Text fw={500} size="sm">
-              {run.flow_id}
-            </Text>
-            <Text size="xs" c="dimmed" ff="monospace">
-              run:{run.run_id.slice(0, 8)}
-            </Text>
-          </Box>
-          <Badge color={borderColor} variant="light" leftSection={statusIcon}>
-            {status}
-          </Badge>
-        </Group>
-        <Text size="xs" c="dimmed" mt="xs">
-          {formatParameters(run.parameters)}
-        </Text>
-        <Group justify="space-between" mt="sm">
-          <Text size="xs" c="dimmed">
-            {getRelativeTime(run.timestamp_utc)}
-          </Text>
-          <Group gap="xs">
-            <Button
-              variant="default"
-              size="xs"
-              onClick={() => onViewDetails(run.run_id)}
-            >
-              Details
-            </Button>
-            <Button
-              variant="subtle"
-              size="xs"
-              onClick={() => onFilterLogs(`{run_id="${run.run_id}"}`)}
-            >
-              Logs
-            </Button>
-          </Group>
-        </Group>
-      </Box>
-    );
-  };
+  }
 
   return (
-    <Stack gap="md" p="md">
-      <Group justify="space-between">
+    <Stack gap={0} className="h-full">
+      <Group
+        justify="space-between"
+        p="md"
+        className="border-b border-gray-200 dark:border-gray-800 flex-shrink-0"
+      >
         <TextInput
-          placeholder="Search runs..."
+          placeholder="Search by Flow ID or Run ID..."
           leftSection={<IconSearch size={16} />}
           style={{ flex: 1 }}
+          disabled
         />
-        <ActionIcon variant="default" onClick={fetchRuns}>
+        <ActionIcon
+          variant="default"
+          onClick={() => refetch()}
+          loading={isRefetching}
+          aria-label="Refresh run history"
+        >
           <IconRefresh size={16} />
         </ActionIcon>
       </Group>
-      <Group>
-        {(["success", "failed", "pending"] as RunStatus[]).map((status) => (
-          <Pill
-            key={status}
-            withRemoveButton={filters.statuses.has(status)}
-            onRemove={() => toggleStatusFilter(status)}
-            onClick={() => toggleStatusFilter(status)}
-          >
-            {status}
-          </Pill>
-        ))}
-      </Group>
-      <ScrollArea style={{ flex: 1 }}>
-        {filteredRuns.length > 0 ? (
-          filteredRuns.map(renderRunCard)
+      <ScrollArea className="flex-1">
+        {sortedRuns.length > 0 ? (
+          sortedRuns.map((run) => {
+            const status = normalizeStatus(run.status);
+            return (
+              <Box
+                key={run.run_id}
+                p="sm"
+                className="border-b border-gray-200 dark:border-gray-800"
+              >
+                <Group justify="space-between" wrap="nowrap">
+                  <Box className="min-w-0">
+                    <Text fw={500} size="sm" truncate>
+                      {run.flow_id}
+                    </Text>
+                    <Text size="xs" c="dimmed" ff="monospace" truncate>
+                      run:{run.run_id}
+                    </Text>
+                  </Box>
+                  <Badge
+                    color={getStatusColor(status)}
+                    variant="light"
+                    leftSection={getStatusIcon(status)}
+                    className="flex-shrink-0"
+                  >
+                    {status}
+                  </Badge>
+                </Group>
+                <Group justify="space-between" mt="sm">
+                  <Text size="xs" c="dimmed">
+                    {getRelativeTime(run.timestamp_utc)}
+                  </Text>
+                  <Group gap="xs">
+                    <Button
+                      variant="default"
+                      size="xs"
+                      onClick={() => onViewDetails(run.run_id)}
+                    >
+                      Details
+                    </Button>
+                    <Button
+                      variant="subtle"
+                      size="xs"
+                      onClick={() => onFilterLogs(`run_id="${run.run_id}"`)}
+                    >
+                      Logs
+                    </Button>
+                  </Group>
+                </Group>
+              </Box>
+            );
+          })
         ) : (
           <Center h={100}>
-            <Text c="dimmed">No runs match filters.</Text>
+            <Text c="dimmed">No run history found.</Text>
           </Center>
         )}
       </ScrollArea>

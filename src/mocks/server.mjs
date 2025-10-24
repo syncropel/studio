@@ -45,7 +45,7 @@ import {
 
 // --- Server Configuration ---
 const WS_PORT = 8889; // WebSocket for the Control Plane (commands/events)
-const HTTP_PORT = 8888; // HTTP for the Data Plane (artifact downloads)
+const HTTP_PORT = 8887; // HTTP for the Data Plane (artifact downloads)
 
 console.log(" MOCK SERVER: Initializing...");
 console.log(

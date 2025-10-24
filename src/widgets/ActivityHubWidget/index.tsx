@@ -1,116 +1,148 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/widgets/ActivityHubWidget/index.tsx
 "use client";
 
-import { useState } from "react";
-import { Tabs, Box, Text, Group, ActionIcon, Tooltip } from "@mantine/core";
+import React from "react";
+import { Tabs, Box, Text, Tooltip, ActionIcon } from "@mantine/core";
 import {
-  IconHistory,
   IconTerminal2,
+  IconHistory,
   IconFileText,
   IconX,
 } from "@tabler/icons-react";
-import EventsTab from "./EventsTab";
+import { useUIStateStore } from "@/shared/store/useUIStateStore";
+
+// Import all the possible panel components
 import TerminalTab from "./TerminalTab";
 import RunsTab from "./RunsTab";
 import RunInspectorTab from "./RunInspectorTab";
 
+// For now, the old LogsTab can serve as our LogsTab. We can refine it later.
+import LogsTab from "./LogsTab";
+
+/**
+ * A "smart" tab controller for the bottom Output Panel.
+ * It dynamically renders tabs based on global state from useUIStateStore, creating
+ * a context-aware and non-redundant user experience.
+ */
 export default function ActivityHubWidget() {
-  const [activeTab, setActiveTab] = useState<string | null>("runs");
-  const [inspectedRunIds, setInspectedRunIds] = useState<string[]>([]);
-  const [eventFilter, setEventFilter] = useState("");
+  const {
+    outputPanelTabs,
+    activeOutputPanelTab,
+    setActiveOutputPanelTab,
+    removeOutputPanelTab,
+    addOutputPanelTab,
+  } = useUIStateStore();
 
-  const openRunInspector = (runId: string) => {
-    if (!inspectedRunIds.includes(runId)) {
-      setInspectedRunIds((prev) => [...prev, runId]);
+  // This function decides which component to render for a given tab ID.
+  // It's the "router" for the output panel.
+  const renderPanelContent = (tabId: string) => {
+    if (tabId === "terminal") {
+      return <TerminalTab />;
     }
-    setActiveTab(`run-detail-${runId}`);
-  };
-
-  const closeRunInspector = (runId: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setInspectedRunIds((prev) => prev.filter((id) => id !== runId));
-    if (activeTab === `run-detail-${runId}`) {
-      setActiveTab("runs");
+    if (tabId === "runs") {
+      return (
+        <RunsTab
+          // When a user clicks "Details" in the RunsTab, add a new inspector tab.
+          onViewDetails={(runId) => addOutputPanelTab(`run-detail-${runId}`)}
+          // When a user clicks "Logs", add a new, filtered logs tab.
+          onFilterLogs={(filter) => addOutputPanelTab(`logs:${filter}`)}
+        />
+      );
     }
+    if (tabId.startsWith("run-detail-")) {
+      const runId = tabId.replace("run-detail-", "");
+      return (
+        <RunInspectorTab
+          runId={runId}
+          onFilterLogs={(filter) => addOutputPanelTab(`logs:${filter}`)}
+        />
+      );
+    }
+    if (tabId.startsWith("logs:")) {
+      const filter = tabId.replace("logs:", "");
+      // The old LogsTab can be repurposed as our new LogsTab.
+      return <LogsTab filter={filter} />;
+    }
+    return (
+      <Text p="md" c="dimmed">
+        Unknown tab type: {tabId}
+      </Text>
+    );
   };
 
-  const navigateToLogs = (filter: string) => {
-    setEventFilter(filter);
-    setActiveTab("events");
-  };
-
-  const handleTabChange = (value: string | null) => {
-    setActiveTab(value ?? "runs");
+  // This function decides the icon and label for each tab.
+  const getTabInfo = (tabId: string) => {
+    if (tabId === "terminal") {
+      return { icon: <IconTerminal2 size={14} />, label: "Terminal" };
+    }
+    if (tabId === "runs") {
+      return { icon: <IconHistory size={14} />, label: "Runs" };
+    }
+    if (tabId.startsWith("run-detail-")) {
+      const shortId = tabId.slice(-6);
+      return { icon: <IconHistory size={14} />, label: `Run: ...${shortId}` };
+    }
+    if (tabId.startsWith("logs:")) {
+      return { icon: <IconFileText size={14} />, label: "Logs" };
+    }
+    return { icon: <IconFileText size={14} />, label: "Unknown" };
   };
 
   return (
     <Box className="h-full w-full flex flex-col bg-gray-50 dark:bg-gray-900">
       <Tabs
-        value={activeTab}
-        onChange={handleTabChange}
+        value={activeOutputPanelTab}
+        onChange={(value) => setActiveOutputPanelTab(value)}
         className="flex flex-col flex-grow h-full"
       >
         <Tabs.List>
-          <Tabs.Tab value="runs" leftSection={<IconHistory size={14} />}>
-            Runs
-          </Tabs.Tab>
-          <Tabs.Tab value="events" leftSection={<IconFileText size={14} />}>
-            Events
-          </Tabs.Tab>
-          <Tabs.Tab value="terminal" leftSection={<IconTerminal2 size={14} />}>
-            Terminal
-          </Tabs.Tab>
-          {inspectedRunIds.map((runId) => (
-            <Tabs.Tab
-              key={runId}
-              value={`run-detail-${runId}`}
-              onMouseDown={(e) => {
-                if (e.button === 1) {
-                  // Middle mouse click
-                  e.preventDefault();
-                  closeRunInspector(runId);
+          {/* Dynamically render the list of tabs from the global store */}
+          {outputPanelTabs.map((tabId) => {
+            const { icon, label } = getTabInfo(tabId);
+            return (
+              <Tabs.Tab
+                key={tabId}
+                value={tabId}
+                leftSection={icon}
+                // The Terminal tab is permanent; all others are closable.
+                rightSection={
+                  tabId !== "terminal" ? (
+                    <Tooltip
+                      label="Close Tab"
+                      position="top"
+                      withArrow
+                      openDelay={500}
+                    >
+                      <ActionIcon
+                        size="xs"
+                        variant="transparent"
+                        onMouseDown={(e) => e.stopPropagation()} // Prevent the tab from gaining focus
+                        onClick={(e) => {
+                          e.stopPropagation(); // Prevent the tab's onChange from firing
+                          removeOutputPanelTab(tabId);
+                        }}
+                        aria-label={`Close tab ${label}`}
+                      >
+                        <IconX size={12} />
+                      </ActionIcon>
+                    </Tooltip>
+                  ) : null
                 }
-              }}
-            >
-              <Group gap="xs" wrap="nowrap">
-                <Text size="xs" component="span">
-                  Run: ...{runId.slice(-6)}
-                </Text>
-                <Tooltip label="Close Tab">
-                  <ActionIcon
-                    size="xs"
-                    variant="transparent"
-                    onClick={(e) => closeRunInspector(runId, e)}
-                  >
-                    <IconX size={12} />
-                  </ActionIcon>
-                </Tooltip>
-              </Group>
-            </Tabs.Tab>
-          ))}
+              >
+                <Text size="xs">{label}</Text>
+              </Tabs.Tab>
+            );
+          })}
         </Tabs.List>
 
-        <Tabs.Panel value="runs" className="flex-grow overflow-auto">
-          <RunsTab
-            onViewDetails={openRunInspector}
-            onFilterLogs={navigateToLogs}
-          />
-        </Tabs.Panel>
-
-        <Tabs.Panel value="events" className="flex-grow overflow-auto">
-          <EventsTab initialFilter={eventFilter} />
-        </Tabs.Panel>
-
-        <Tabs.Panel value="terminal" className="flex-grow overflow-auto">
-          <TerminalTab />
-        </Tabs.Panel>
-
-        {inspectedRunIds.map((runId) => (
+        {/* Dynamically render the content panel for each tab */}
+        {outputPanelTabs.map((tabId) => (
           <Tabs.Panel
-            key={runId}
-            value={`run-detail-${runId}`}
+            key={tabId}
+            value={tabId}
             className="flex-grow overflow-auto"
           >
-            <RunInspectorTab runId={runId} onFilterLogs={navigateToLogs} />
+            {renderPanelContent(tabId)}
           </Tabs.Panel>
         ))}
       </Tabs>

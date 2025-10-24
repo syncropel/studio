@@ -6,14 +6,20 @@ import React, {
   useContext,
   ReactNode,
   useCallback,
-  useEffect,
   useRef,
 } from "react";
 import useReactWebSocket, { ReadyState } from "react-use-websocket";
 import { notifications } from "@mantine/notifications";
+import { nanoid } from "nanoid";
 
 import { useConnectionStore } from "@/shared/store/useConnectionStore";
-import { useSessionStore } from "@/shared/store/useSessionStore";
+import {
+  EcosystemPackage,
+  EcosystemRegistry,
+  useSessionStore,
+} from "@/shared/store/useSessionStore";
+import { useUIStateStore } from "@/shared/store/useUIStateStore";
+import { useSettingsStore } from "@/shared/store/useSettingsStore";
 import {
   InboundMessage,
   SessionLoadedFields,
@@ -22,19 +28,11 @@ import {
   PageLoadedFields,
   PageSavedFields,
   PageStatusFields,
+  VfsArtifactLinkResultFields,
 } from "../api/types";
 
 const log = (message: string, ...args: any[]) =>
   console.log(`[WebSocketProvider] ${message}`, ...args);
-
-const readyStateToString = (readyState: ReadyState): string =>
-  ({
-    [ReadyState.CONNECTING]: "Connecting",
-    [ReadyState.OPEN]: "Open",
-    [ReadyState.CLOSING]: "Closing",
-    [ReadyState.CLOSED]: "Closed",
-    [ReadyState.UNINSTANTIATED]: "Uninstantiated",
-  }[readyState] || "Unknown");
 
 type OutboundMessage = {
   type: string;
@@ -55,11 +53,8 @@ const MAX_RECONNECT_ATTEMPTS = 3;
 export function WebSocketProvider({ children }: { children: ReactNode }) {
   const activeProfile = useConnectionStore((state) => state.getActiveProfile());
   const socketUrl = activeProfile?.url ?? null;
-
   const hasAttemptedConnection = useRef(false);
 
-  // CHANGED: Get these functions fresh each time by accessing the store directly in the handler
-  // instead of extracting them once at the component level
   log(`Provider rendered. Active profile:`, activeProfile);
   log(`Attempting to connect to URL: ${socketUrl}`);
 
@@ -118,24 +113,18 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         try {
           const message: InboundMessage = JSON.parse(event.data);
 
-          // CHANGED: Get store functions fresh each time
-          const {
-            setLastJsonMessage,
-            setBlockResult,
-            setCurrentPage,
-            setConnections,
-            setVariables,
-            handleWorkspaceBrowseResult,
-            setHomepageData,
-            setSavedPage,
-            setPageRunStatus,
-          } = useSessionStore.getState();
+          // Get fresh state and actions from all stores within the handler
+          const sessionActions = useSessionStore.getState();
+          const uiActions = useUIStateStore.getState();
+          const settingsState = useSettingsStore.getState();
 
-          setLastJsonMessage(message);
+          const { setInstalledPackages, setAvailablePackages, setRegistries } =
+            useSessionStore.getState();
+
+          sessionActions.setLastJsonMessage(message);
           const { type, payload } = message;
           const fields = payload.fields;
 
-          // CHANGED: Added logging for all message types
           log(`📨 Received message type: ${type}`, fields);
 
           switch (type) {
@@ -143,38 +132,24 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             case "BLOCK.OUTPUT":
             case "BLOCK.ERROR":
               if (fields?.block_id) {
-                log(`Setting block result for: ${fields.block_id}`, fields);
-                setBlockResult(fields.block_id, fields as any);
+                sessionActions.setBlockResult(fields.block_id, fields as any);
               }
               break;
+
             case "PAGE.LOADED":
-              log(`📄 PAGE.LOADED received`, fields);
               if (fields) {
-                const { initial_model, content } = fields as PageLoadedFields;
-                log(`initial_model exists: ${!!initial_model}`);
-                log(`content exists: ${!!content}`);
+                const { initial_model } = fields as PageLoadedFields;
                 if (initial_model) {
-                  log(
-                    `🎯 Setting currentPage with initial_model:`,
-                    initial_model
-                  );
-                  setCurrentPage(initial_model);
-                  // CHANGED: Log the state immediately after setting
-                  setTimeout(() => {
-                    const currentState = useSessionStore.getState().currentPage;
-                    log(`✅ currentPage in store after set:`, currentState);
-                  }, 0);
-                } else {
-                  log(`⚠️ No initial_model in PAGE.LOADED message`);
+                  sessionActions.setCurrentPage(initial_model);
                 }
-              } else {
-                log(`⚠️ No fields in PAGE.LOADED message`);
               }
               break;
+
             case "PAGE.SAVED":
               if (fields) {
                 const { uri, name } = fields as PageSavedFields;
-                setSavedPage(uri, name);
+                sessionActions.setSavedPage(uri, name);
+                uiActions.setIsSaving(false); // Clear the saving state on success
                 notifications.show({
                   title: "Saved",
                   message: `Notebook '${name}' saved successfully.`,
@@ -183,50 +158,120 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
                 });
               }
               break;
+
             case "PAGE.STATUS":
               if (fields) {
                 const status = fields as PageStatusFields;
-                if (
-                  status.status === "completed" ||
-                  status.status === "failed"
-                ) {
-                  setPageRunStatus(null);
-                } else {
-                  setPageRunStatus(status);
-                }
+                sessionActions.setPageRunStatus(
+                  status.status === "completed" || status.status === "failed"
+                    ? null
+                    : status
+                );
               }
               break;
+
             case "SESSION.LOADED":
               if (fields) {
                 const { new_session_state } = fields as SessionLoadedFields;
                 if (new_session_state) {
-                  setConnections(new_session_state.connections);
-                  setVariables(new_session_state.variables);
+                  sessionActions.setConnections(new_session_state.connections);
+                  sessionActions.setVariables(new_session_state.variables);
                 }
               }
               break;
+
             case "WORKSPACE.BROWSE_RESULT":
               if (fields) {
-                handleWorkspaceBrowseResult(
+                sessionActions.handleWorkspaceBrowseResult(
                   fields as WorkspaceBrowseResultFields
                 );
               }
               break;
+
             case "HOMEPAGE.DATA_RESULT":
               if (fields) {
-                setHomepageData(fields as HomepageDataResultFields);
+                sessionActions.setHomepageData(
+                  fields as HomepageDataResultFields
+                );
               }
               break;
-            case "RUN_HISTORY_RESULT":
-            case "RUN_DETAIL_RESULT":
+
+            case "VFS.ARTIFACT_LINK_RESULT":
+              if (fields) {
+                const dataRef = fields as VfsArtifactLinkResultFields;
+                const artifactName =
+                  dataRef.access_url.split("/").pop() || "VFS File";
+                const artifactType = dataRef.renderer_hint as any;
+
+                sessionActions.addInspectedArtifact({
+                  id: `vfs-${dataRef.artifact_id}`,
+                  runId: "vfs-inspector",
+                  artifactName: artifactName,
+                  content: null, // Content will be fetched by React Query on demand
+                  type: artifactType,
+                });
+
+                // Automatically open the inspector if it isn't already
+                if (!settingsState.isInspectorVisible) {
+                  settingsState.toggleInspector(true);
+                }
+              }
               break;
+
+            case "HISTORY.QUERY_RESULT":
+              // For now, we'll just log this. The RunsTab will handle its own data.
+              log("Received HISTORY.QUERY_RESULT:", fields);
+              break;
+
+            case "HISTORY.GET_RESULT":
+              // The RunInspectorTab will handle its own data.
+              log("Received HISTORY.GET_RESULT:", fields);
+              break;
+
+            case "LOGS.QUERY_RESULT":
+              // We'll create a store for this later. For now, just log it.
+              log("Received LOGS.QUERY_RESULT:", fields);
+              break;
+
             case "SYSTEM.ERROR":
+              uiActions.setIsSaving(false); // Also clear saving state on any system error.
               notifications.show({
                 title: "Server Error",
                 message: payload.message,
                 color: "red",
               });
               break;
+            case "ECOSYSTEM.INSTALLED_RESULT":
+              if (fields) {
+                // Cast `fields` to the specific type our action expects.
+                setInstalledPackages(
+                  fields as {
+                    blueprints: EcosystemPackage[];
+                    applications: EcosystemPackage[];
+                  }
+                );
+              }
+              break;
+
+            case "ECOSYSTEM.REGISTRIES_RESULT":
+              if (fields) {
+                // Cast `fields` (which is an array in this case)
+                setRegistries(fields as EcosystemRegistry[]);
+              }
+              break;
+
+            case "ECOSYSTEM.PACKAGES_RESULT":
+              if (fields) {
+                // Cast `fields` to the same shape as the installed packages result.
+                setAvailablePackages(
+                  fields as {
+                    blueprints: EcosystemPackage[];
+                    applications: EcosystemPackage[];
+                  }
+                );
+              }
+              break;
+
             default:
               log(`⚠️ Unknown message type: ${type}`);
           }
@@ -237,6 +282,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             "Raw data:",
             event.data
           );
+          // Ensure spinner stops even if frontend parsing fails
+          useUIStateStore.getState().setIsSaving(false);
         }
       },
       shouldReconnect: () => !!activeProfile,

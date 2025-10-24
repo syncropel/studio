@@ -9,13 +9,17 @@ import { nanoid } from "nanoid";
 import { useSessionStore } from "@/shared/store/useSessionStore";
 import { useUIStateStore } from "@/shared/store/useUIStateStore";
 import { useWebSocket } from "@/shared/providers/WebSocketProvider";
-import { serializePageToText } from "@/shared/lib/serialization";
+import {
+  serializePageToText,
+  parsePageFromText,
+} from "@/shared/lib/serialization";
 import { useMonacoDecorations } from "../hooks/useMonacoDecorations";
 import { registerSemanticFolding } from "../hooks/useSemanticFolding";
 import { useMonacoWidgets } from "../hooks/useMonacoWidgets";
 import { useFoldingWidgets } from "../hooks/useFoldingWidgets";
 import { ContextualPage } from "@/shared/types/notebook";
 import SaveAsModal, { setEditorInstance } from "@/widgets/SaveAsModal";
+import { useDebouncedCallback } from "@mantine/hooks";
 
 const log = (message: string, ...args: any[]) =>
   console.log(`[DocumentView] ${message}`, ...args);
@@ -43,6 +47,7 @@ export default function DocumentView() {
     saveTrigger,
     openModal,
     runAllTrigger,
+    setIsSaving,
   } = useUIStateStore();
 
   const editorInstance = isEditorReady ? editorRef.current : null;
@@ -54,19 +59,54 @@ export default function DocumentView() {
   );
   const foldingPortals = useFoldingWidgets(editorInstance);
 
+  // --- 3. REPLACE YOUR DEBOUNCE LOGIC WITH THIS ---
+  // Create a debounced function to update the store using the Mantine hook.
+  const debouncedUpdateStore = useDebouncedCallback((newContent: string) => {
+    // Note: We read `currentPage` directly from the store inside the callback
+    // to ensure we always have the freshest version and avoid stale closures.
+    const page = useSessionStore.getState().currentPage;
+    if (page?.id) {
+      console.log(
+        "[DocumentView] Debounced change fired. Parsing and updating global store."
+      );
+      const updatedPageModel = parsePageFromText(page.id, newContent);
+      // Directly set the new page model in the store.
+      useSessionStore.setState({
+        currentPage: updatedPageModel,
+        isDirty: true,
+      });
+    }
+  }, 500); // 500ms delay
+
+  const handleContentChange = (value: string | undefined) => {
+    const newContent = value || "";
+    // Update the local `content` state immediately for a responsive editor.
+    setContent(newContent);
+    // Call the debounced function, which will handle the rest.
+    debouncedUpdateStore(newContent);
+  };
+
   useEffect(() => {
     if (saveTrigger > 0) {
       log("Save triggered from UI store.");
       const editor = editorRef.current;
+      // Get the latest state directly from the store to avoid stale closures
       const page = useSessionStore.getState().currentPage;
+      const isDirty = useSessionStore.getState().isDirty;
 
-      if (editor && page) {
+      if (editor && page && isDirty) {
+        // Set the global saving flag to true to start the UI animation
+        setIsSaving(true);
+
         if (page.id?.startsWith("local-")) {
           openModal({
             title: "Save Notebook As...",
             content: <SaveAsModal />,
             size: "lg",
           });
+          // If the user cancels the modal, we need to reset the saving state.
+          // For now, we'll let the WebSocket error handler do it, or we could add a modal `onClose`.
+          // For simplicity, we'll let it time out or error out. A future improvement.
         } else {
           const currentContent = editor.getValue();
           const serializedContent = serializePageToText(page, currentContent);
@@ -81,7 +121,7 @@ export default function DocumentView() {
         }
       }
     }
-  }, [saveTrigger, openModal, sendJsonMessage]);
+  }, [saveTrigger, openModal, sendJsonMessage, setIsSaving]);
 
   useEffect(() => {
     if (runAllTrigger > 0) {
@@ -315,7 +355,11 @@ export default function DocumentView() {
     });
 
     editor.onDidChangeModelContent(() => {
-      setIsDirty(true);
+      // This is still useful to mark dirty on the very first keystroke
+      // before the debounce timer fires.
+      if (!useSessionStore.getState().isDirty) {
+        setIsDirty(true);
+      }
     });
   };
 
@@ -338,6 +382,7 @@ export default function DocumentView() {
           value={content}
           theme="light"
           onMount={handleEditorDidMount}
+          onChange={handleContentChange}
           options={{
             readOnly: !currentPage,
             minimap: { enabled: false },

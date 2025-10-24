@@ -89,6 +89,7 @@ export interface WorkspaceBrowseResultFields {
   data: {
     projects: any[];
     library: any[];
+    cx_home?: any[];
   };
 }
 
@@ -126,8 +127,10 @@ export interface RunDetail {
   artifacts: RunDetailArtifact[];
 }
 
-export type RunHistoryResultFields = RunHistoryItem[];
+export type RunHistoryResultFields = DataRef;
 export type RunDetailResultFields = RunDetail;
+
+export type LogQueryResultFields = DataRef;
 
 // ========================================================================
 //   SECTION 2: SYNCROPEL DECLARATIVE UI (SDUI) SCHEMAS
@@ -177,3 +180,5 @@ export interface InspectedArtifact {
   content: any;
   type: "table" | "image" | "json" | "text" | "unknown";
 }
+
+export type VfsArtifactLinkResultFields = DataRef;

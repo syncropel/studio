@@ -9,12 +9,27 @@ import {
   InspectedArtifact,
   PageStatusFields,
 } from "../api/types";
+import { getCstDocument } from "../lib/serialization";
+
+export interface EcosystemPackage {
+  id: string;
+  name: string;
+  version: string;
+  namespace: string;
+  description: string;
+}
+
+export interface EcosystemRegistry {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
 
 export interface AssetTreeNode {
   key: string;
   title: string;
   isLeaf: boolean;
-  type: "project" | "group" | "flow" | "query" | "application";
+  type: "project" | "group" | "flow" | "query" | "application" | "config_file";
   children?: AssetTreeNode[];
 }
 
@@ -51,6 +66,7 @@ interface SessionStore {
   lastJsonMessage: InboundMessage | null;
   projectsTreeData: AssetTreeNode[];
   libraryTreeData: AssetTreeNode[];
+  cxHomeTreeData: AssetTreeNode[];
   homepageData: HomepageDataResultFields | null;
   isWorkspaceLoading: boolean;
   isHomepageLoading: boolean;
@@ -61,6 +77,12 @@ interface SessionStore {
   inspectedArtifacts: InspectedArtifact[];
   isDirty: boolean;
   pageRunStatus: PageStatusFields | null;
+  installedBlueprints: EcosystemPackage[];
+  installedApplications: EcosystemPackage[];
+  availableBlueprints: EcosystemPackage[];
+  availableApplications: EcosystemPackage[];
+  registries: EcosystemRegistry[];
+  isEcosystemLoading: boolean;
 
   // --- ACTIONS ---
   setLastJsonMessage: (message: InboundMessage | null) => void;
@@ -88,6 +110,16 @@ interface SessionStore {
   setSavedPage: (pageId: string, pageName: string) => void;
   updateBlockMetadata: (blockId: string, metadata: Partial<Block>) => void;
   setPageRunStatus: (status: PageStatusFields | null) => void;
+  setInstalledPackages: (data: {
+    blueprints: EcosystemPackage[];
+    applications: EcosystemPackage[];
+  }) => void;
+  setAvailablePackages: (data: {
+    blueprints: EcosystemPackage[];
+    applications: EcosystemPackage[];
+  }) => void;
+  setRegistries: (data: EcosystemRegistry[]) => void;
+  setIsEcosystemLoading: (isLoading: boolean) => void;
 }
 
 const initialState = {
@@ -95,6 +127,7 @@ const initialState = {
   variables: [],
   lastJsonMessage: null,
   projectsTreeData: [],
+  cxHomeTreeData: [],
   libraryTreeData: [],
   homepageData: null,
   isWorkspaceLoading: true,
@@ -106,6 +139,12 @@ const initialState = {
   inspectedArtifacts: [],
   isDirty: false,
   pageRunStatus: null,
+  installedBlueprints: [],
+  installedApplications: [],
+  availableBlueprints: [],
+  availableApplications: [],
+  registries: [],
+  isEcosystemLoading: true,
 };
 
 export const useSessionStore = create<SessionStore>()(
@@ -148,20 +187,38 @@ export const useSessionStore = create<SessionStore>()(
       handleWorkspaceBrowseResult: (payload) =>
         set((state) => {
           const { path, data } = payload;
-          if (path === "/") {
+
+          // Root-level loading based on scheme
+          if (path === "projects://") {
             return {
-              projectsTreeData: data.projects || [],
-              libraryTreeData: data.library || [],
-              isWorkspaceLoading: false,
+              projectsTreeData: (data as any).projects || [],
+              isWorkspaceLoading: false, // Loading is complete once projects arrive
             };
-          } else {
-            const nodes = Array.isArray(data) ? (data as any[]) : [];
+          }
+          if (path === "library://") {
+            return {
+              libraryTreeData: (data as any).library || [],
+            };
+          }
+          if (path === "cx_home://") {
+            return {
+              cxHomeTreeData: (data as any).cx_home || [],
+            };
+          }
+
+          // Sub-path (lazy-loading) logic
+          const nodes = Array.isArray(data) ? (data as any[]) : [];
+          if (path.startsWith("projects://")) {
             return {
               projectsTreeData: updateTreeDataWithChildren(
                 state.projectsTreeData,
                 path,
                 nodes
               ),
+            };
+          }
+          if (path.startsWith("library://")) {
+            return {
               libraryTreeData: updateTreeDataWithChildren(
                 state.libraryTreeData,
                 path,
@@ -169,7 +226,19 @@ export const useSessionStore = create<SessionStore>()(
               ),
             };
           }
+          if (path.startsWith("cx_home://")) {
+            return {
+              cxHomeTreeData: updateTreeDataWithChildren(
+                state.cxHomeTreeData,
+                path,
+                nodes
+              ),
+            };
+          }
+
+          return {}; // Fallback if no path matches
         }),
+
       setSelectedBlockId: (blockId) => set({ selectedBlockId: blockId }),
       updateBlockContent: (blockId, newContent) =>
         set((state) => {
@@ -213,12 +282,60 @@ export const useSessionStore = create<SessionStore>()(
         localStorage.removeItem("syncropel-session-recovery");
       },
       updatePageMetadata: (metadata) =>
-        set((state) => ({
-          currentPage: state.currentPage
-            ? { ...state.currentPage, ...metadata }
-            : null,
-          isDirty: true,
-        })),
+        set((state) => {
+          if (!state.currentPage) {
+            return {};
+          }
+
+          // Retrieve the underlying CST document associated with the page's frontmatter.
+          // We use the page object itself as the key.
+          const frontmatterCst = getCstDocument(state.currentPage);
+
+          if (frontmatterCst) {
+            // --- HAPPY PATH: A CST was found. Modify it directly. ---
+
+            // Update the 'name' field if it was provided.
+            if (metadata.name !== undefined) {
+              if (frontmatterCst.has("name")) {
+                frontmatterCst.set("name", metadata.name);
+              } else {
+                // Add the key if it didn't exist before.
+                frontmatterCst.add({ key: "name", value: metadata.name });
+              }
+            }
+
+            // Update the 'description' field if it was provided.
+            if (metadata.description !== undefined) {
+              if (frontmatterCst.has("description")) {
+                frontmatterCst.set("description", metadata.description);
+              } else {
+                frontmatterCst.add({
+                  key: "description",
+                  value: metadata.description,
+                });
+              }
+            }
+
+            // Regenerate the plain JavaScript object from the modified CST.
+            // This ensures our React components still work with simple objects.
+            const newPageData = frontmatterCst.toJS();
+
+            return {
+              currentPage: { ...state.currentPage, ...newPageData },
+              isDirty: true,
+            };
+          }
+
+          // --- FALLBACK PATH: No CST was found. Perform a simple object merge. ---
+          // This ensures functionality doesn't break, even if comments might be lost on save.
+          console.warn(
+            "No CST found for page metadata. Updating plain object as a fallback."
+          );
+          return {
+            currentPage: { ...state.currentPage, ...metadata },
+            isDirty: true,
+          };
+        }),
       setIsDirty: (isDirty) => set({ isDirty }),
       setClean: () => set({ isDirty: false }),
       setSavedPage: (pageId, pageName) =>
@@ -240,6 +357,20 @@ export const useSessionStore = create<SessionStore>()(
           };
         }),
       setPageRunStatus: (status) => set({ pageRunStatus: status }),
+      setInstalledPackages: (data) =>
+        set({
+          installedBlueprints: data.blueprints || [],
+          installedApplications: data.applications || [],
+          isEcosystemLoading: false, // Mark initial loading as complete
+        }),
+      setAvailablePackages: (data) =>
+        set({
+          availableBlueprints: data.blueprints || [],
+          availableApplications: data.applications || [],
+        }),
+      setRegistries: (data) => set({ registries: data || [] }),
+      setIsEcosystemLoading: (isLoading) =>
+        set({ isEcosystemLoading: isLoading }),
     }),
     {
       name: "syncropel-session-recovery",
