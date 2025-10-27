@@ -36,6 +36,8 @@ export interface ContextualPage {
   blocks: Block[];
   author?: string;
   tags?: string[];
+  /** The ID of a `.context.md` file associated with this notebook for persistent context. */
+  notebook_context_id?: string;
 }
 
 export type BlockResult =

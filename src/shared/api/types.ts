@@ -108,23 +108,33 @@ export interface RunHistoryItem {
 }
 
 export interface RunDetailStep {
-  id: string;
+  step_id: string;
   status: string;
-  duration_ms: number;
+  duration_ms: number; // This was missing
+  summary: string;
+  cache_hit: boolean;
+  output_hash?: string;
 }
 
 export interface RunDetailArtifact {
-  name: string;
+  name: string; // This is the key in the artifacts dictionary
+  content_hash: string;
+  mime_type: string;
   size_bytes: number;
-  access_url: string;
+  type: string; // e.g., 'primary_output', 'log_file'
+  access_url?: string;
 }
 
 export interface RunDetail {
   run_id: string;
   flow_id: string;
   status: string;
+  timestamp_utc: string; // This was missing
+  duration_total_ms: number; // This was missing
+  parameters: Record<string, any>; // This was missing
   steps: RunDetailStep[];
-  artifacts: RunDetailArtifact[];
+  // The key is the artifact's user-facing filename
+  artifacts: Record<string, RunDetailArtifact>;
 }
 
 export type RunHistoryResultFields = DataRef;
@@ -182,3 +192,61 @@ export interface InspectedArtifact {
 }
 
 export type VfsArtifactLinkResultFields = DataRef;
+
+// ========================================================================
+//   SECTION 3: AGENT & CONTEXT PROTOCOL (ACP) v1.4
+// ========================================================================
+
+// --- Client -> Server Commands ---
+
+export interface AgentPromptPayload {
+  prompt: string;
+  page_id?: string;
+  notebook_context_id?: string;
+  context_paths?: string[];
+}
+
+// --- Server -> Client Events ---
+
+/**
+ * A complete, client-dispatchable command provided by the agent.
+ * This is a fully-formed SCP message that the client can send directly.
+ */
+export type AgentSuggestedCommand = {
+  command_id: string; // A pre-generated UUID for tracing, provided by the server.
+  type: string; // The command type, e.g., "BLOCK.RUN", "PAGE.SAVE".
+  payload: Record<string, unknown>;
+};
+
+/**
+ * Defines a single, clickable action button presented by the agent.
+ */
+export interface AgentResponseAction {
+  id: string; // A unique ID for the UI element, e.g., "act_approve_plan_xyz".
+  label: string; // The text on the button, e.g., "✅ Fix and Rerun".
+  command: AgentSuggestedCommand; // The full command to dispatch if this action is clicked.
+}
+
+/**
+ * The definitive structure for the `payload.fields` of an AGENT.RESPONSE event.
+ */
+export interface AgentResponseFields {
+  content: string; // The markdown-formatted text content of the message.
+  actions?: AgentResponseAction[]; // An optional list of interactive buttons.
+}
+
+/**
+ * The structure for a context suggestion from the agent.
+ */
+export interface AgentContextSuggestion {
+  vfs_path: string;
+  reason: string;
+}
+
+/**
+ * The definitive structure for the `payload.fields` of an AGENT.SUGGEST_CONTEXT event.
+ */
+export interface AgentSuggestContextFields {
+  suggestions: AgentContextSuggestion[];
+  actions: AgentResponseAction[];
+}

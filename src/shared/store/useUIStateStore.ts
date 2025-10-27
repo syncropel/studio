@@ -1,13 +1,51 @@
 // /home/dpwanjala/repositories/syncropel/studio/src/shared/store/useUIStateStore.ts
 import { create } from "zustand";
 import React from "react";
+import { AgentResponseFields } from "@/shared/api/types";
+
+// --- TYPE DEFINITIONS ---
 
 // The different "views" that can be displayed in the main sidebar panel.
-// 'history' is removed as it's now an action, not a persistent view.
 export type SidebarView = "explorer" | "ecosystem" | "global";
 
 // Commands that can be sent to the Monaco editor instance.
 export type FoldingCommand = "collapseAll" | "expandAll" | "collapseCode";
+
+// The mode of the main input bar in the Output Panel.
+export type OutputPanelMode = "agent" | "cli";
+
+// --- DEFINITIVE UNIFIED CONVERSATION/TERMINAL HISTORY TYPES ---
+// These define all possible "turns" or lines that can appear in the unified terminal history.
+
+export interface UserPrompt {
+  type: "user_prompt";
+  prompt: string;
+  context_paths: string[];
+}
+export interface AgentResponse extends AgentResponseFields {
+  type: "agent_response";
+}
+export interface CliInput {
+  type: "cli_input";
+  content: string;
+}
+export interface CliOutput {
+  type: "cli_output";
+  content: string;
+  interactive_run_id?: string;
+}
+export interface ModeSwitch {
+  type: "mode_switch";
+  newMode: OutputPanelMode;
+}
+
+// The ConversationTurn is a union of all possible line types.
+export type ConversationTurn =
+  | UserPrompt
+  | AgentResponse
+  | CliInput
+  | CliOutput
+  | ModeSwitch;
 
 // The shape of a generic modal that can be opened from anywhere.
 interface ModalState {
@@ -27,18 +65,23 @@ interface UIStateStore {
   activeSidebarView: SidebarView;
   isSpotlightVisible: boolean;
   isConnectionManagerOpen: boolean;
-  isNavDrawerOpen: boolean; // Mobile-only
-  isInspectorDrawerOpen: boolean; // Mobile-only
+  isNavDrawerOpen: boolean;
+  isInspectorDrawerOpen: boolean;
   foldingCommand: FoldingCommand | null;
   modalState: ModalState | null;
-  activeFormWidgetIds: Set<string>;
-  showCommandPalette: boolean;
+
+  // Unified Terminal/Conversation State
+  outputPanelMode: OutputPanelMode;
+  promptContextPaths: string[];
+  conversationHistory: ConversationTurn[];
+
+  // Triggers
   isSaving: boolean;
   saveTrigger: number;
   runAllTrigger: number;
 
-  // State for the dynamic Output Panel
-  outputPanelTabs: string[]; // e.g., ['terminal', 'runs', 'run-detail-xyz']
+  // Dynamic Output Panel State
+  outputPanelTabs: string[];
   activeOutputPanelTab: string | null;
 
   // --- ACTIONS ---
@@ -51,15 +94,19 @@ interface UIStateStore {
   setFoldingCommand: (command: FoldingCommand | null) => void;
   openModal: (state: ModalState) => void;
   closeModal: () => void;
-  toggleFormWidget: (widgetId: string) => void;
-  closeAllFormWidgets: () => void;
-  triggerCommandPalette: () => void;
-  resetCommandPalette: () => void;
+
+  // Unified Terminal/Conversation Actions
+  setOutputPanelMode: (mode: OutputPanelMode) => void;
+  setPromptContextPaths: (paths: string[]) => void;
+  addConversationTurn: (turn: ConversationTurn) => void;
+  clearConversation: () => void;
+
+  // General Triggers
   setIsSaving: (saving: boolean) => void;
   triggerSave: () => void;
   triggerRunAll: () => void;
 
-  // Actions for the dynamic Output Panel
+  // Dynamic Output Panel Actions
   addOutputPanelTab: (tabId: string) => void;
   removeOutputPanelTab: (tabId: string) => void;
   setActiveOutputPanelTab: (tabId: string | null) => void;
@@ -74,16 +121,42 @@ export const useUIStateStore = create<UIStateStore>((set, get) => ({
   isInspectorDrawerOpen: false,
   foldingCommand: null,
   modalState: null,
-  activeFormWidgetIds: new Set(),
-  showCommandPalette: false,
+
+  outputPanelMode: "agent", // Default to the intelligent agent mode
+  promptContextPaths: [],
+  conversationHistory: [],
+
   isSaving: false,
   saveTrigger: 0,
   runAllTrigger: 0,
-  outputPanelTabs: ["terminal"], // Default to only showing the terminal tab.
+
+  outputPanelTabs: ["terminal"], // The ONLY permanent tab is 'terminal'
   activeOutputPanelTab: "terminal",
 
   // --- ACTION IMPLEMENTATIONS ---
   setActiveSidebarView: (view) => set({ activeSidebarView: view }),
+
+  // Unified Terminal/Conversation Actions
+  setOutputPanelMode: (mode) => {
+    // When switching modes, add a visual separator to the history for clarity
+    if (get().outputPanelMode !== mode) {
+      set((state) => ({
+        outputPanelMode: mode,
+        conversationHistory: [
+          ...state.conversationHistory,
+          { type: "mode_switch", newMode: mode },
+        ],
+      }));
+    }
+  },
+  setPromptContextPaths: (paths) => set({ promptContextPaths: paths }),
+  addConversationTurn: (turn) =>
+    set((state) => ({
+      conversationHistory: [...state.conversationHistory, turn],
+    })),
+  clearConversation: () => set({ conversationHistory: [] }),
+
+  // All other existing actions
   openSpotlight: () => set({ isSpotlightVisible: true }),
   closeSpotlight: () => set({ isSpotlightVisible: false }),
   toggleConnectionManager: (open) =>
@@ -103,62 +176,37 @@ export const useUIStateStore = create<UIStateStore>((set, get) => ({
   setFoldingCommand: (command) => set({ foldingCommand: command }),
   openModal: (state) => set({ modalState: state }),
   closeModal: () => set({ modalState: null }),
-
-  toggleFormWidget: (widgetId) =>
-    set((state) => {
-      const newSet = new Set(state.activeFormWidgetIds);
-      if (newSet.has(widgetId)) {
-        newSet.delete(widgetId);
-      } else {
-        newSet.add(widgetId);
-      }
-      return { activeFormWidgetIds: newSet };
-    }),
-
-  closeAllFormWidgets: () => set({ activeFormWidgetIds: new Set() }),
-  triggerCommandPalette: () => set({ showCommandPalette: true }),
-  resetCommandPalette: () => set({ showCommandPalette: false }),
   setIsSaving: (saving) => set({ isSaving: saving }),
   triggerSave: () => set((state) => ({ saveTrigger: state.saveTrigger + 1 })),
   triggerRunAll: () =>
     set((state) => ({ runAllTrigger: state.runAllTrigger + 1 })),
 
-  // --- Actions for the dynamic Output Panel ---
   setActiveOutputPanelTab: (tabId) => set({ activeOutputPanelTab: tabId }),
-
   addOutputPanelTab: (tabId) => {
     const { outputPanelTabs } = get();
-    // If the tab doesn't already exist, add it.
     if (!outputPanelTabs.includes(tabId)) {
       set({
         outputPanelTabs: [...outputPanelTabs, tabId],
-        activeOutputPanelTab: tabId, // Automatically switch to the new tab
+        activeOutputPanelTab: tabId,
       });
     } else {
-      // If the tab already exists, just switch to it.
       set({ activeOutputPanelTab: tabId });
     }
   },
-
   removeOutputPanelTab: (tabIdToRemove) => {
-    // The 'terminal' tab is permanent and cannot be removed.
+    // The 'terminal' tab is the new permanent tab.
     if (tabIdToRemove === "terminal") return;
-
     set((state) => {
       const newTabs = state.outputPanelTabs.filter(
         (id) => id !== tabIdToRemove
       );
       let newActiveTab = state.activeOutputPanelTab;
-
-      // If the closed tab was the active one, decide which tab to activate next.
       if (state.activeOutputPanelTab === tabIdToRemove) {
         const closedTabIndex = state.outputPanelTabs.findIndex(
           (id) => id === tabIdToRemove
         );
-        // Intelligently activate the tab to the left, or fallback to the terminal.
-        newActiveTab = newTabs[closedTabIndex - 1] || "terminal";
+        newActiveTab = newTabs[closedTabIndex - 1] || "terminal"; // Fallback to the permanent 'terminal' tab
       }
-
       return {
         outputPanelTabs: newTabs,
         activeOutputPanelTab: newActiveTab,

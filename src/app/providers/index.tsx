@@ -6,6 +6,8 @@ import { Notifications } from "@mantine/notifications";
 import { WebSocketProvider } from "@/shared/providers/WebSocketProvider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+import "rc-tree/assets/index.css";
+
 // Import Mantine's core styles (as before)
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";

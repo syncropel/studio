@@ -29,6 +29,7 @@ import {
   PageSavedFields,
   PageStatusFields,
   VfsArtifactLinkResultFields,
+  AgentResponseFields,
 } from "../api/types";
 
 const log = (message: string, ...args: any[]) =>
@@ -113,21 +114,66 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         try {
           const message: InboundMessage = JSON.parse(event.data);
 
-          // Get fresh state and actions from all stores within the handler
+          // Get fresh state and actions from all stores as needed.
           const sessionActions = useSessionStore.getState();
           const uiActions = useUIStateStore.getState();
           const settingsState = useSettingsStore.getState();
 
-          const { setInstalledPackages, setAvailablePackages, setRegistries } =
-            useSessionStore.getState();
-
+          // Always store the last message for debugging and for hooks that need it.
           sessionActions.setLastJsonMessage(message);
+
           const { type, payload } = message;
           const fields = payload.fields;
 
           log(`📨 Received message type: ${type}`, fields);
 
           switch (type) {
+            // --- UNIFIED TERMINAL / AGENT HANDLERS ---
+
+            case "COMMAND.RESULT":
+              if (fields?.result) {
+                // Parse for a run_id to make the output interactive (the "golden link").
+                const runIdMatch = String(fields.result).match(
+                  /Run ID: \[ (run_[a-zA-Z0-9]+) \]/
+                );
+                uiActions.addConversationTurn({
+                  type: "cli_output",
+                  content: fields.result,
+                  interactive_run_id: runIdMatch ? runIdMatch[1] : undefined,
+                });
+              }
+              break;
+
+            case "AGENT.THOUGHT":
+              if (fields?.content) {
+                uiActions.addConversationTurn({
+                  type: "agent_response",
+                  content: `*${fields.content}*`, // Italicize for "thinking" style
+                });
+              }
+              break;
+
+            case "AGENT.RESPONSE":
+              if (fields) {
+                uiActions.addConversationTurn({
+                  type: "agent_response",
+                  ...(fields as AgentResponseFields),
+                });
+              }
+              break;
+
+            case "SYSTEM.ERROR":
+              // This error can be a response to either a CLI or Agent command.
+              // We render it as a standard CLI error for consistency in the terminal.
+              uiActions.addConversationTurn({
+                type: "cli_output",
+                content: `Error: ${payload.message}`,
+              });
+              uiActions.setIsSaving(false); // Also clear saving state on any system error
+              break;
+
+            // --- CORE APPLICATION EVENT HANDLERS ---
+
             case "BLOCK.STATUS":
             case "BLOCK.OUTPUT":
             case "BLOCK.ERROR":
@@ -149,7 +195,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               if (fields) {
                 const { uri, name } = fields as PageSavedFields;
                 sessionActions.setSavedPage(uri, name);
-                uiActions.setIsSaving(false); // Clear the saving state on success
+                uiActions.setIsSaving(false);
                 notifications.show({
                   title: "Saved",
                   message: `Notebook '${name}' saved successfully.`,
@@ -207,11 +253,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
                   id: `vfs-${dataRef.artifact_id}`,
                   runId: "vfs-inspector",
                   artifactName: artifactName,
-                  content: null, // Content will be fetched by React Query on demand
+                  content: null,
                   type: artifactType,
                 });
 
-                // Automatically open the inspector if it isn't already
                 if (!settingsState.isInspectorVisible) {
                   settingsState.toggleInspector(true);
                 }
@@ -219,57 +264,19 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               break;
 
             case "HISTORY.QUERY_RESULT":
-              // For now, we'll just log this. The RunsTab will handle its own data.
-              log("Received HISTORY.QUERY_RESULT:", fields);
-              break;
-
             case "HISTORY.GET_RESULT":
-              // The RunInspectorTab will handle its own data.
-              log("Received HISTORY.GET_RESULT:", fields);
-              break;
-
             case "LOGS.QUERY_RESULT":
-              // We'll create a store for this later. For now, just log it.
-              log("Received LOGS.QUERY_RESULT:", fields);
+              // These events are now primarily handled by the components that
+              // request them (via `lastJsonMessage`). No specific global state
+              // change is needed here, but we log it for debugging.
+              log(`Received data query result: ${type}`);
               break;
 
-            case "SYSTEM.ERROR":
-              uiActions.setIsSaving(false); // Also clear saving state on any system error.
-              notifications.show({
-                title: "Server Error",
-                message: payload.message,
-                color: "red",
-              });
-              break;
             case "ECOSYSTEM.INSTALLED_RESULT":
-              if (fields) {
-                // Cast `fields` to the specific type our action expects.
-                setInstalledPackages(
-                  fields as {
-                    blueprints: EcosystemPackage[];
-                    applications: EcosystemPackage[];
-                  }
-                );
-              }
-              break;
-
             case "ECOSYSTEM.REGISTRIES_RESULT":
-              if (fields) {
-                // Cast `fields` (which is an array in this case)
-                setRegistries(fields as EcosystemRegistry[]);
-              }
-              break;
-
             case "ECOSYSTEM.PACKAGES_RESULT":
-              if (fields) {
-                // Cast `fields` to the same shape as the installed packages result.
-                setAvailablePackages(
-                  fields as {
-                    blueprints: EcosystemPackage[];
-                    applications: EcosystemPackage[];
-                  }
-                );
-              }
+              // These events are handled by the EcosystemView via `lastJsonMessage`.
+              log(`Received ecosystem data: ${type}`);
               break;
 
             default:
@@ -282,7 +289,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             "Raw data:",
             event.data
           );
-          // Ensure spinner stops even if frontend parsing fails
+          // Ensure spinner stops even if frontend parsing fails, as a safety net.
           useUIStateStore.getState().setIsSaving(false);
         }
       },

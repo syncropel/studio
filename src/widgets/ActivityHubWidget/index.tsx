@@ -12,17 +12,16 @@ import {
 import { useUIStateStore } from "@/shared/store/useUIStateStore";
 
 // Import all the possible panel components
-import TerminalTab from "./TerminalTab";
 import RunsTab from "./RunsTab";
 import RunInspectorTab from "./RunInspectorTab";
-
-// For now, the old LogsTab can serve as our LogsTab. We can refine it later.
 import LogsTab from "./LogsTab";
+import TerminalView from "../OutputPanel/TerminalView";
 
 /**
  * A "smart" tab controller for the bottom Output Panel.
  * It dynamically renders tabs based on global state from useUIStateStore, creating
- * a context-aware and non-redundant user experience.
+ * a context-aware and non-redundant user experience with a permanent "Terminal"
+ * tab and dynamic, closable tabs for other contexts.
  */
 export default function ActivityHubWidget() {
   const {
@@ -36,15 +35,14 @@ export default function ActivityHubWidget() {
   // This function decides which component to render for a given tab ID.
   // It's the "router" for the output panel.
   const renderPanelContent = (tabId: string) => {
+    // The 'terminal' tab is now the permanent home for our unified view.
     if (tabId === "terminal") {
-      return <TerminalTab />;
+      return <TerminalView />;
     }
     if (tabId === "runs") {
       return (
         <RunsTab
-          // When a user clicks "Details" in the RunsTab, add a new inspector tab.
           onViewDetails={(runId) => addOutputPanelTab(`run-detail-${runId}`)}
-          // When a user clicks "Logs", add a new, filtered logs tab.
           onFilterLogs={(filter) => addOutputPanelTab(`logs:${filter}`)}
         />
       );
@@ -60,9 +58,9 @@ export default function ActivityHubWidget() {
     }
     if (tabId.startsWith("logs:")) {
       const filter = tabId.replace("logs:", "");
-      // The old LogsTab can be repurposed as our new LogsTab.
       return <LogsTab filter={filter} />;
     }
+    // Fallback for any unknown tab type
     return (
       <Text p="md" c="dimmed">
         Unknown tab type: {tabId}
@@ -116,9 +114,9 @@ export default function ActivityHubWidget() {
                       <ActionIcon
                         size="xs"
                         variant="transparent"
-                        onMouseDown={(e) => e.stopPropagation()} // Prevent the tab from gaining focus
+                        onMouseDown={(e) => e.stopPropagation()} // Prevents tab from gaining focus on middle-click
                         onClick={(e) => {
-                          e.stopPropagation(); // Prevent the tab's onChange from firing
+                          e.stopPropagation(); // Prevents the tab's onChange from firing
                           removeOutputPanelTab(tabId);
                         }}
                         aria-label={`Close tab ${label}`}

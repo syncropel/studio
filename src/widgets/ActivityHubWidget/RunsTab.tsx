@@ -7,14 +7,14 @@ import {
   Text,
   Loader,
   Center,
-  Badge,
   Button,
   Group,
   Stack,
   TextInput,
   ScrollArea,
   ActionIcon,
-  MantineColor,
+  Tooltip,
+  UnstyledButton,
 } from "@mantine/core";
 import {
   IconSearch,
@@ -22,6 +22,8 @@ import {
   IconCheck,
   IconX,
   IconClock,
+  IconFileText,
+  IconChartBar,
 } from "@tabler/icons-react";
 import { useWebSocket } from "@/shared/providers/WebSocketProvider";
 import { useSessionStore } from "@/shared/store/useSessionStore";
@@ -36,9 +38,11 @@ interface RunsTabProps {
 }
 
 type RunStatus = "success" | "failed" | "pending" | "running";
+type StatusFilter = "all" | "success" | "failed" | "running";
 
 // --- Helper Functions ---
 
+// CHANGED: Simplified status normalization for compact display
 const normalizeStatus = (status: string): RunStatus => {
   if (!status) return "pending";
   const lower = status.toLowerCase();
@@ -59,35 +63,51 @@ const normalizeStatus = (status: string): RunStatus => {
   return "pending";
 };
 
-const getStatusColor = (status: RunStatus): MantineColor => {
-  if (status === "success") return "green";
-  if (status === "failed") return "red";
-  return "yellow";
+// CHANGED: Simplified to return emoji for ultra-compact display
+const getStatusEmoji = (status: RunStatus): string => {
+  if (status === "success") return "✅";
+  if (status === "failed") return "❌";
+  if (status === "running") return "🔄";
+  return "⏳";
 };
 
-const getStatusIcon = (status: RunStatus) => {
-  if (status === "success") return <IconCheck size={14} />;
-  if (status === "failed") return <IconX size={14} />;
-  return <IconClock size={14} />;
-};
-
-const getRelativeTime = (timestamp: string): string => {
+// CHANGED: More compact relative time format (11m, 2h, 1d instead of "11m ago")
+const getCompactRelativeTime = (timestamp: string): string => {
   const diffMs = new Date().getTime() - new Date(timestamp).getTime();
   const diffMins = Math.floor(diffMs / 60000);
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffMins < 1) return "now";
+  if (diffMins < 60) return `${diffMins}m`;
   const diffHours = Math.floor(diffMs / 3600000);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return new Date(timestamp).toLocaleDateString();
+  if (diffHours < 24) return `${diffHours}h`;
+  const diffDays = Math.floor(diffMs / 86400000);
+  return `${diffDays}d`;
+};
+
+// CHANGED: Truncate run ID to first 7 characters for compact display
+const getShortRunId = (runId: string): string => {
+  return runId.slice(0, 7);
+};
+
+// CHANGED: Format parameters as compact key=val or "-" if empty
+const formatCompactParams = (params: Record<string, any>): string => {
+  const entries = Object.entries(params);
+  if (entries.length === 0) return "-";
+  const firstParam = entries[0];
+  let value = String(firstParam[1]);
+  // Truncate long values
+  if (value.length > 12) {
+    value = value.slice(0, 12) + "..";
+  }
+  let summary = `${firstParam[0]}=${value}`;
+  if (entries.length > 1) {
+    summary += `+${entries.length - 1}`;
+  }
+  return summary;
 };
 
 export default function RunsTab({ onViewDetails, onFilterLogs }: RunsTabProps) {
   // --- DATA FETCHING LOGIC ---
-  // 1. We hold the "claim check" (DataRef) in local state.
   const [dataRef, setDataRef] = useState<DataRef | null>(null);
-
-  // 1. Conditionally enable the query.
-  // 2. Pass a valid-but-empty DataRef when it's null to prevent the hook from crashing.
   const {
     data: runs,
     isLoading,
@@ -96,32 +116,32 @@ export default function RunsTab({ onViewDetails, onFilterLogs }: RunsTabProps) {
     refetch,
     isRefetching,
   } = useArtifactQuery(
-    dataRef || { artifact_id: "", access_url: "", renderer_hint: "" }, // Provide a dummy object
-    !!dataRef // The hook is only enabled when dataRef is NOT null.
+    dataRef || { artifact_id: "", access_url: "", renderer_hint: "" },
+    !!dataRef
   );
+
+  // CHANGED: Added state for search and status filtering
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
   const { sendJsonMessage, readyState } = useWebSocket();
   const { lastJsonMessage } = useSessionStore();
-
-  // A stable ID for this component instance to correlate WebSocket messages.
   const commandId = useMemo(() => `history-query-${nanoid()}`, []);
 
-  // 3. This function sends the command to the server to *get the DataRef*.
   const fetchRunHistoryRef = useCallback(() => {
     if (readyState === ReadyState.OPEN) {
       sendJsonMessage({
         type: "HISTORY.QUERY",
         command_id: commandId,
-        payload: { limit: 100 }, // A sensible default limit
+        payload: { limit: 100 },
       });
     }
   }, [readyState, sendJsonMessage, commandId]);
 
-  // 4. Trigger the initial fetch when the component mounts.
   useEffect(() => {
     fetchRunHistoryRef();
   }, [fetchRunHistoryRef]);
 
-  // 5. Listen for the WebSocket response that contains the DataRef.
   useEffect(() => {
     if (
       lastJsonMessage?.type === "HISTORY.QUERY_RESULT" &&
@@ -131,22 +151,58 @@ export default function RunsTab({ onViewDetails, onFilterLogs }: RunsTabProps) {
         | DataRef
         | undefined;
       if (receivedDataRef) {
-        setDataRef(receivedDataRef); // This enables the useArtifactQuery hook to start fetching.
+        setDataRef(receivedDataRef);
       }
     }
   }, [lastJsonMessage, commandId]);
 
-  // 6. Sort the data once it's fetched by React Query.
-  const sortedRuns = useMemo(() => {
+  // CHANGED: Enhanced filtering logic with search and status filter
+  const filteredAndSortedRuns = useMemo(() => {
     if (!runs || !Array.isArray(runs)) return [];
-    return [...(runs as RunHistoryItem[])].sort(
+
+    const searchLower = searchTerm.toLowerCase();
+
+    let filtered = (runs as RunHistoryItem[]).filter((run) => {
+      // Apply search filter
+      const matchesSearch =
+        !searchTerm ||
+        run.flow_id.toLowerCase().includes(searchLower) ||
+        run.run_id.toLowerCase().includes(searchLower);
+
+      // Apply status filter
+      const status = normalizeStatus(run.status);
+      const matchesStatus = statusFilter === "all" || status === statusFilter;
+
+      return matchesSearch && matchesStatus;
+    });
+
+    // Sort by timestamp descending (newest first)
+    return filtered.sort(
       (a, b) =>
         new Date(b.timestamp_utc).getTime() -
         new Date(a.timestamp_utc).getTime()
     );
-  }, [runs]);
+  }, [runs, searchTerm, statusFilter]);
 
-  // --- RENDER LOGIC ---
+  // CHANGED: Calculate stats for footer
+  const stats = useMemo(() => {
+    if (!runs || !Array.isArray(runs)) {
+      return { total: 0, success: 0, failed: 0, running: 0, pending: 0 };
+    }
+
+    const typedRuns = runs as RunHistoryItem[];
+    return {
+      total: typedRuns.length,
+      success: typedRuns.filter((r) => normalizeStatus(r.status) === "success")
+        .length,
+      failed: typedRuns.filter((r) => normalizeStatus(r.status) === "failed")
+        .length,
+      running: typedRuns.filter((r) => normalizeStatus(r.status) === "running")
+        .length,
+      pending: typedRuns.filter((r) => normalizeStatus(r.status) === "pending")
+        .length,
+    };
+  }, [runs]);
 
   if (isLoading && !runs) {
     return (
@@ -166,84 +222,200 @@ export default function RunsTab({ onViewDetails, onFilterLogs }: RunsTabProps) {
 
   return (
     <Stack gap={0} className="h-full">
+      {/* CHANGED: Ultra-compact header with search, filters, and refresh */}
       <Group
         justify="space-between"
-        p="md"
+        p="xs"
+        gap="xs"
         className="border-b border-gray-200 dark:border-gray-800 flex-shrink-0"
       >
-        <TextInput
-          placeholder="Search by Flow ID or Run ID..."
-          leftSection={<IconSearch size={16} />}
-          style={{ flex: 1 }}
-          disabled
-        />
-        <ActionIcon
-          variant="default"
-          onClick={() => refetch()}
-          loading={isRefetching}
-          aria-label="Refresh run history"
-        >
-          <IconRefresh size={16} />
-        </ActionIcon>
+        <Group gap="xs" style={{ flex: 1 }}>
+          <TextInput
+            placeholder="Search..."
+            leftSection={<IconSearch size={14} />}
+            size="xs"
+            style={{ minWidth: 180 }}
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.currentTarget.value)}
+          />
+          <ActionIcon
+            variant="default"
+            size="sm"
+            onClick={() => refetch()}
+            loading={isRefetching}
+            aria-label="Refresh run history"
+          >
+            <IconRefresh size={14} />
+          </ActionIcon>
+        </Group>
+
+        {/* CHANGED: Status filter buttons */}
+        <Group gap={4}>
+          <Button
+            variant={statusFilter === "all" ? "light" : "subtle"}
+            size="xs"
+            onClick={() => setStatusFilter("all")}
+            leftSection={<Text size="xs">📊</Text>}
+          >
+            All
+          </Button>
+          <Button
+            variant={statusFilter === "success" ? "light" : "subtle"}
+            size="xs"
+            color="green"
+            onClick={() => setStatusFilter("success")}
+            leftSection={<Text size="xs">✅</Text>}
+          >
+            Success
+          </Button>
+          <Button
+            variant={statusFilter === "failed" ? "light" : "subtle"}
+            size="xs"
+            color="red"
+            onClick={() => setStatusFilter("failed")}
+            leftSection={<Text size="xs">❌</Text>}
+          >
+            Failed
+          </Button>
+          <Button
+            variant={statusFilter === "running" ? "light" : "subtle"}
+            size="xs"
+            color="blue"
+            onClick={() => setStatusFilter("running")}
+            leftSection={<Text size="xs">⏳</Text>}
+          >
+            Running
+          </Button>
+        </Group>
+
+        {/* CHANGED: Compact pagination info */}
+        <Text size="xs" c="dimmed" className="whitespace-nowrap">
+          {filteredAndSortedRuns.length} of {stats.total}
+        </Text>
       </Group>
+
+      {/* CHANGED: Ultra-compact scrollable list */}
       <ScrollArea className="flex-1">
-        {sortedRuns.length > 0 ? (
-          sortedRuns.map((run) => {
-            const status = normalizeStatus(run.status);
-            return (
-              <Box
-                key={run.run_id}
-                p="sm"
-                className="border-b border-gray-200 dark:border-gray-800"
-              >
-                <Group justify="space-between" wrap="nowrap">
-                  <Box className="min-w-0">
-                    <Text fw={500} size="sm" truncate>
-                      {run.flow_id}
-                    </Text>
-                    <Text size="xs" c="dimmed" ff="monospace" truncate>
-                      run:{run.run_id}
-                    </Text>
-                  </Box>
-                  <Badge
-                    color={getStatusColor(status)}
-                    variant="light"
-                    leftSection={getStatusIcon(status)}
-                    className="flex-shrink-0"
-                  >
-                    {status}
-                  </Badge>
-                </Group>
-                <Group justify="space-between" mt="sm">
-                  <Text size="xs" c="dimmed">
-                    {getRelativeTime(run.timestamp_utc)}
+        {filteredAndSortedRuns.length > 0 ? (
+          <Box>
+            {filteredAndSortedRuns.map((run) => {
+              const status = normalizeStatus(run.status);
+              return (
+                // CHANGED: Single-line ultra-compact layout
+                <Box
+                  key={run.run_id}
+                  className="hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                  style={{
+                    padding: "4px 12px",
+                    fontSize: "12px",
+                    fontFamily: "monospace",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "12px",
+                    borderBottom: "1px solid var(--mantine-color-gray-2)",
+                  }}
+                >
+                  {/* Status emoji */}
+                  <Text size="sm" className="flex-shrink-0">
+                    {getStatusEmoji(status)}
                   </Text>
-                  <Group gap="xs">
-                    <Button
-                      variant="default"
-                      size="xs"
-                      onClick={() => onViewDetails(run.run_id)}
-                    >
-                      Details
-                    </Button>
-                    <Button
-                      variant="subtle"
-                      size="xs"
-                      onClick={() => onFilterLogs(`run_id="${run.run_id}"`)}
-                    >
-                      Logs
-                    </Button>
+
+                  {/* Time */}
+                  <Text
+                    size="xs"
+                    c="dimmed"
+                    className="flex-shrink-0"
+                    style={{ width: "32px", textAlign: "right" }}
+                  >
+                    {getCompactRelativeTime(run.timestamp_utc)}
+                  </Text>
+
+                  {/* Short Run ID */}
+                  <Text
+                    size="xs"
+                    c="dimmed"
+                    className="flex-shrink-0"
+                    style={{ width: "60px" }}
+                  >
+                    {getShortRunId(run.run_id)}
+                  </Text>
+
+                  {/* Flow name - takes remaining space */}
+                  <Text
+                    size="xs"
+                    style={{ flex: 1, minWidth: 0 }}
+                    truncate
+                    title={run.flow_id}
+                  >
+                    {run.flow_id}
+                  </Text>
+
+                  {/* Parameters - compact */}
+                  <Text
+                    size="xs"
+                    c="dimmed"
+                    className="flex-shrink-0"
+                    style={{ width: "120px" }}
+                    truncate
+                    title={JSON.stringify(run.parameters)}
+                  >
+                    {formatCompactParams(run.parameters)}
+                  </Text>
+
+                  {/* CHANGED: Icon-only action buttons */}
+                  <Group gap={4} className="flex-shrink-0">
+                    <Tooltip label="Details" withArrow>
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onViewDetails(run.run_id);
+                        }}
+                      >
+                        <IconFileText size={14} />
+                      </ActionIcon>
+                    </Tooltip>
+                    <Tooltip label="Logs" withArrow>
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onFilterLogs(`run_id="${run.run_id}"`);
+                        }}
+                      >
+                        <IconChartBar size={14} />
+                      </ActionIcon>
+                    </Tooltip>
                   </Group>
-                </Group>
-              </Box>
-            );
-          })
+                </Box>
+              );
+            })}
+          </Box>
         ) : (
           <Center h={100}>
-            <Text c="dimmed">No run history found.</Text>
+            <Text size="sm" c="dimmed">
+              {searchTerm || statusFilter !== "all"
+                ? "No runs match your filters."
+                : "No run history found."}
+            </Text>
           </Center>
         )}
       </ScrollArea>
+
+      {/* CHANGED: Footer with aggregated stats */}
+      {filteredAndSortedRuns.length > 0 && (
+        <Box
+          p="xs"
+          className="border-t border-gray-200 dark:border-gray-800 flex-shrink-0"
+        >
+          <Text size="xs" c="dimmed" ta="center">
+            {filteredAndSortedRuns.length} shown • {stats.success} ✅ •{" "}
+            {stats.failed} ❌ • {stats.running} 🔄 • {stats.pending} ⏳
+          </Text>
+        </Box>
+      )}
     </Stack>
   );
 }
