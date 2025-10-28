@@ -162,7 +162,7 @@ export default function RunsTab({ onViewDetails, onFilterLogs }: RunsTabProps) {
 
     const searchLower = searchTerm.toLowerCase();
 
-    let filtered = (runs as RunHistoryItem[]).filter((run) => {
+    const filtered = (runs as RunHistoryItem[]).filter((run) => {
       // Apply search filter
       const matchesSearch =
         !searchTerm ||

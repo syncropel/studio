@@ -42,8 +42,7 @@ export default function DocumentView() {
   const {
     foldingCommand,
     setFoldingCommand,
-    showCommandPalette,
-    resetCommandPalette,
+    commandPaletteTrigger, // UPDATED
     saveTrigger,
     openModal,
     runAllTrigger,
@@ -142,12 +141,12 @@ export default function DocumentView() {
   }, [runAllTrigger, sendJsonMessage, pageParameters, clearAllBlockResults]);
 
   useEffect(() => {
-    if (editorInstance && showCommandPalette) {
+    // This effect now runs whenever the trigger number changes, but not on initial load.
+    if (editorInstance && commandPaletteTrigger > 0) {
       editorInstance.focus();
       editorInstance.getAction("editor.action.quickCommand")?.run();
-      resetCommandPalette();
     }
-  }, [editorInstance, showCommandPalette, resetCommandPalette]);
+  }, [editorInstance, commandPaletteTrigger]);
 
   useEffect(() => {
     if (editorInstance && foldingCommand) {

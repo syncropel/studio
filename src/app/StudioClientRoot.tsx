@@ -190,7 +190,7 @@ export default function StudioClientRoot() {
               <Text c="dimmed" ta="center">
                 Could not connect to{" "}
                 <Text span fw={700}>
-                  '{activeProfile.name}'
+                  `{activeProfile.name}`
                 </Text>
                 . <br />
                 The server may be offline or the URL may be incorrect.
@@ -337,7 +337,7 @@ export default function StudioClientRoot() {
             <>
               <PanelResizeHandle className="h-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 transition-colors" />
               {/* CHANGED: Wrapped ActivityHubWidget in a Box with h-full and w-full for proper height/width constraint */}
-              <Panel defaultSize={25} minSize={15} maxSize={60}>
+              <Panel defaultSize={50} minSize={15}>
                 <div
                   style={{
                     height: "100%",
@@ -346,7 +346,7 @@ export default function StudioClientRoot() {
                     flexDirection: "column",
                   }}
                 >
-                  <ActivityHubWidget />
+                  <ActivityHubWidget readyState={readyState} />
                 </div>
               </Panel>
             </>

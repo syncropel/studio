@@ -5,17 +5,9 @@ import { AgentResponseFields } from "@/shared/api/types";
 
 // --- TYPE DEFINITIONS ---
 
-// The different "views" that can be displayed in the main sidebar panel.
 export type SidebarView = "explorer" | "ecosystem" | "global";
-
-// Commands that can be sent to the Monaco editor instance.
 export type FoldingCommand = "collapseAll" | "expandAll" | "collapseCode";
-
-// The mode of the main input bar in the Output Panel.
 export type OutputPanelMode = "agent" | "cli";
-
-// --- DEFINITIVE UNIFIED CONVERSATION/TERMINAL HISTORY TYPES ---
-// These define all possible "turns" or lines that can appear in the unified terminal history.
 
 export interface UserPrompt {
   type: "user_prompt";
@@ -39,7 +31,6 @@ export interface ModeSwitch {
   newMode: OutputPanelMode;
 }
 
-// The ConversationTurn is a union of all possible line types.
 export type ConversationTurn =
   | UserPrompt
   | AgentResponse
@@ -47,19 +38,12 @@ export type ConversationTurn =
   | CliOutput
   | ModeSwitch;
 
-// The shape of a generic modal that can be opened from anywhere.
 interface ModalState {
   title: string;
   content: React.ReactNode;
   size?: string | number;
 }
 
-/**
- * Manages transient UI state that should NOT be persisted across sessions.
- * This store is responsible for the visibility of modals, drawers, and other
- * temporary UI elements. It also acts as a "command bus" for cross-component
- * communication via simple triggers.
- */
 interface UIStateStore {
   // --- STATE ---
   activeSidebarView: SidebarView;
@@ -69,20 +53,16 @@ interface UIStateStore {
   isInspectorDrawerOpen: boolean;
   foldingCommand: FoldingCommand | null;
   modalState: ModalState | null;
-
-  // Unified Terminal/Conversation State
   outputPanelMode: OutputPanelMode;
   promptContextPaths: string[];
   conversationHistory: ConversationTurn[];
-
-  // Triggers
   isSaving: boolean;
   saveTrigger: number;
   runAllTrigger: number;
-
-  // Dynamic Output Panel State
   outputPanelTabs: string[];
   activeOutputPanelTab: string | null;
+  activeFormWidgetIds: Set<string>;
+  commandPaletteTrigger: number; // ADDED
 
   // --- ACTIONS ---
   setActiveSidebarView: (view: SidebarView) => void;
@@ -94,22 +74,18 @@ interface UIStateStore {
   setFoldingCommand: (command: FoldingCommand | null) => void;
   openModal: (state: ModalState) => void;
   closeModal: () => void;
-
-  // Unified Terminal/Conversation Actions
   setOutputPanelMode: (mode: OutputPanelMode) => void;
   setPromptContextPaths: (paths: string[]) => void;
   addConversationTurn: (turn: ConversationTurn) => void;
   clearConversation: () => void;
-
-  // General Triggers
   setIsSaving: (saving: boolean) => void;
   triggerSave: () => void;
   triggerRunAll: () => void;
-
-  // Dynamic Output Panel Actions
   addOutputPanelTab: (tabId: string) => void;
   removeOutputPanelTab: (tabId: string) => void;
   setActiveOutputPanelTab: (tabId: string | null) => void;
+  toggleFormWidget: (widgetId: string) => void;
+  triggerCommandPalette: () => void; // ADDED
 }
 
 export const useUIStateStore = create<UIStateStore>((set, get) => ({
@@ -121,24 +97,20 @@ export const useUIStateStore = create<UIStateStore>((set, get) => ({
   isInspectorDrawerOpen: false,
   foldingCommand: null,
   modalState: null,
-
-  outputPanelMode: "agent", // Default to the intelligent agent mode
+  outputPanelMode: "agent",
   promptContextPaths: [],
   conversationHistory: [],
-
   isSaving: false,
   saveTrigger: 0,
   runAllTrigger: 0,
-
-  outputPanelTabs: ["terminal"], // The ONLY permanent tab is 'terminal'
+  outputPanelTabs: ["terminal"],
   activeOutputPanelTab: "terminal",
+  activeFormWidgetIds: new Set(),
+  commandPaletteTrigger: 0, // ADDED
 
   // --- ACTION IMPLEMENTATIONS ---
   setActiveSidebarView: (view) => set({ activeSidebarView: view }),
-
-  // Unified Terminal/Conversation Actions
   setOutputPanelMode: (mode) => {
-    // When switching modes, add a visual separator to the history for clarity
     if (get().outputPanelMode !== mode) {
       set((state) => ({
         outputPanelMode: mode,
@@ -155,8 +127,6 @@ export const useUIStateStore = create<UIStateStore>((set, get) => ({
       conversationHistory: [...state.conversationHistory, turn],
     })),
   clearConversation: () => set({ conversationHistory: [] }),
-
-  // All other existing actions
   openSpotlight: () => set({ isSpotlightVisible: true }),
   closeSpotlight: () => set({ isSpotlightVisible: false }),
   toggleConnectionManager: (open) =>
@@ -180,7 +150,6 @@ export const useUIStateStore = create<UIStateStore>((set, get) => ({
   triggerSave: () => set((state) => ({ saveTrigger: state.saveTrigger + 1 })),
   triggerRunAll: () =>
     set((state) => ({ runAllTrigger: state.runAllTrigger + 1 })),
-
   setActiveOutputPanelTab: (tabId) => set({ activeOutputPanelTab: tabId }),
   addOutputPanelTab: (tabId) => {
     const { outputPanelTabs } = get();
@@ -194,7 +163,6 @@ export const useUIStateStore = create<UIStateStore>((set, get) => ({
     }
   },
   removeOutputPanelTab: (tabIdToRemove) => {
-    // The 'terminal' tab is the new permanent tab.
     if (tabIdToRemove === "terminal") return;
     set((state) => {
       const newTabs = state.outputPanelTabs.filter(
@@ -205,7 +173,7 @@ export const useUIStateStore = create<UIStateStore>((set, get) => ({
         const closedTabIndex = state.outputPanelTabs.findIndex(
           (id) => id === tabIdToRemove
         );
-        newActiveTab = newTabs[closedTabIndex - 1] || "terminal"; // Fallback to the permanent 'terminal' tab
+        newActiveTab = newTabs[closedTabIndex - 1] || "terminal";
       }
       return {
         outputPanelTabs: newTabs,
@@ -213,4 +181,19 @@ export const useUIStateStore = create<UIStateStore>((set, get) => ({
       };
     });
   },
+  toggleFormWidget: (widgetId) =>
+    set((state) => {
+      const newSet = new Set(state.activeFormWidgetIds);
+      if (newSet.has(widgetId)) {
+        newSet.delete(widgetId);
+      } else {
+        newSet.add(widgetId);
+      }
+      return { activeFormWidgetIds: newSet };
+    }),
+  triggerCommandPalette: () =>
+    // ADDED
+    set((state) => ({
+      commandPaletteTrigger: state.commandPaletteTrigger + 1,
+    })),
 }));

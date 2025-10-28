@@ -2,7 +2,7 @@
 "use client";
 
 import React from "react";
-import { Tabs, Box, Text, Tooltip, ActionIcon } from "@mantine/core";
+import { Tabs, Box, Text, Tooltip, ActionIcon, Stack } from "@mantine/core";
 import {
   IconTerminal2,
   IconHistory,
@@ -16,6 +16,7 @@ import RunsTab from "./RunsTab";
 import RunInspectorTab from "./RunInspectorTab";
 import LogsTab from "./LogsTab";
 import TerminalView from "../OutputPanel/TerminalView";
+import { ReadyState } from "react-use-websocket";
 
 /**
  * A "smart" tab controller for the bottom Output Panel.
@@ -23,7 +24,11 @@ import TerminalView from "../OutputPanel/TerminalView";
  * a context-aware and non-redundant user experience with a permanent "Terminal"
  * tab and dynamic, closable tabs for other contexts.
  */
-export default function ActivityHubWidget() {
+export default function ActivityHubWidget({
+  readyState,
+}: {
+  readyState: number;
+}) {
   const {
     outputPanelTabs,
     activeOutputPanelTab,
@@ -85,6 +90,7 @@ export default function ActivityHubWidget() {
     }
     return { icon: <IconFileText size={14} />, label: "Unknown" };
   };
+  const isConnected = readyState === ReadyState.OPEN;
 
   return (
     <div
@@ -94,8 +100,52 @@ export default function ActivityHubWidget() {
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
+        position: "relative", // ADDED for overlay
       }}
     >
+      {/* Connection Lost Overlay - Covers entire ActivityHub */}
+      {!isConnected && (
+        <Box
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backdropFilter: "blur(4px)",
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Stack align="center" gap="md">
+            <Box
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text size="xl" style={{ fontSize: 32 }}>
+                ⚠️
+              </Text>
+            </Box>
+            <Stack align="center" gap="xs">
+              <Text size="xl" fw={700} c="red">
+                Connection Lost
+              </Text>
+              <Text size="sm" c="dimmed" ta="center">
+                Activity Hub is unavailable until connection is restored
+              </Text>
+            </Stack>
+          </Stack>
+        </Box>
+      )}
+
       <Tabs
         value={activeOutputPanelTab}
         onChange={(value) => setActiveOutputPanelTab(value)}

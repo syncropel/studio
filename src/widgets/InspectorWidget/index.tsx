@@ -150,7 +150,7 @@ export default function InspectorWidget() {
           <Title order={4}>Data Tray</Title>
           {showPlaceholder && (
             <Text c="dimmed" mt="sm" size="sm">
-              Select a block to see its details or 'Pin' an output to inspect it
+              Select a block to see its details or `Pin` an output to inspect it
               here.
             </Text>
           )}

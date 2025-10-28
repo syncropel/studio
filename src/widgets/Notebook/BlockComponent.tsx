@@ -46,11 +46,13 @@ export default function BlockComponent({ block }: BlockComponentProps) {
     setSelectedBlockId,
     updateBlockContent,
     pageParameters,
-    showCodeBlocks,
-    showMarkdownBlocks,
   } = useSessionStore();
-
-  const { isInspectorVisible, toggleInspector } = useSettingsStore();
+  const {
+    showCode: showCodeBlocks,
+    showNarrative: showMarkdownBlocks,
+    isInspectorVisible,
+    toggleInspector,
+  } = useSettingsStore();
 
   const blockResult = blockResults[block.id];
   const isSelected = selectedBlockId === block.id;

@@ -1,3 +1,4 @@
+// /home/dpwanjala/repositories/syncropel/studio/src/widgets/ActivityHubWidget/EventsTab.tsx
 "use client";
 
 import React, { useEffect, useState, useRef, useMemo } from "react";
@@ -30,7 +31,7 @@ import {
   IconChevronDown,
 } from "@tabler/icons-react";
 import { useSessionStore } from "@/shared/store/useSessionStore";
-import { LogEventPayload } from "@/shared/api/types";
+import { SepPayload } from "@/shared/api/types";
 
 interface EventsTabProps {
   initialFilter?: string;
@@ -64,7 +65,7 @@ const EventLogLine = React.memo(
     isHighlighted,
     onClick,
   }: {
-    log: LogEventPayload;
+    log: SepPayload;
     isHighlighted: boolean;
     onClick: () => void;
   }) => {
@@ -112,9 +113,7 @@ const EventLogLine = React.memo(
     const stepId = log.fields?.step_id
       ? `..${String(log.fields.step_id).slice(-6)}`
       : null;
-    const blockId = log.fields?.block_id
-      ? String(log.fields.block_id)
-      : null;
+    const blockId = log.fields?.block_id ? String(log.fields.block_id) : null;
     const component = log.labels?.component || null;
 
     return (
@@ -131,12 +130,10 @@ const EventLogLine = React.memo(
         >
           <Group wrap="nowrap" gap="md" align="flex-start">
             {/* Timestamp */}
-            <Text
-              size="xs"
-              c="dimmed"
-              className="font-mono w-16 flex-shrink-0"
-            >
-              {new Date(log.timestamp).toLocaleTimeString("en-US", {
+            <Text size="xs" c="dimmed" className="font-mono w-16 flex-shrink-0">
+              {new Date(
+                (log as any).timestamp || Date.now()
+              ).toLocaleTimeString("en-US", {
                 hour12: false,
                 hour: "2-digit",
                 minute: "2-digit",
@@ -259,7 +256,7 @@ const EventDetailModal = ({
   opened,
   onClose,
 }: {
-  event: LogEventPayload | null;
+  event: SepPayload | null;
   opened: boolean;
   onClose: () => void;
 }) => {
@@ -317,7 +314,9 @@ const EventDetailModal = ({
               {event.labels?.component || "Unknown"}
             </Text>
             <Text size="sm" c="dimmed">
-              {new Date(event.timestamp).toLocaleString()}
+              {new Date(
+                (event as any).timestamp || Date.now()
+              ).toLocaleString()}
             </Text>
           </Group>
           <Text size="md" fw={500}>
@@ -423,8 +422,8 @@ const EventDetailModal = ({
 
 // Main EventsTab component
 export default function EventsTab({ initialFilter = "" }: EventsTabProps) {
-  const [allEvents, setAllEvents] = useState<LogEventPayload[]>([]);
-  const [queuedEvents, setQueuedEvents] = useState<LogEventPayload[]>([]);
+  const [allEvents, setAllEvents] = useState<SepPayload[]>([]);
+  const [queuedEvents, setQueuedEvents] = useState<SepPayload[]>([]);
   const [isPaused, setIsPaused] = useState(false);
   const [filters, setFilters] = useState<EventFilters>({
     searchText: initialFilter,
@@ -433,9 +432,7 @@ export default function EventsTab({ initialFilter = "" }: EventsTabProps) {
     component: null,
     runId: null,
   });
-  const [selectedEvent, setSelectedEvent] = useState<LogEventPayload | null>(
-    null
-  );
+  const [selectedEvent, setSelectedEvent] = useState<SepPayload | null>(null);
   const [modalOpened, setModalOpened] = useState(false);
 
   const lastJsonMessage = useSessionStore((state) => state.lastJsonMessage);
@@ -448,8 +445,11 @@ export default function EventsTab({ initialFilter = "" }: EventsTabProps) {
 
   // Handle incoming log events
   useEffect(() => {
-    if (lastJsonMessage?.type === "LOG_EVENT") {
-      const logEvent = lastJsonMessage.payload as LogEventPayload;
+    if (lastJsonMessage?.type === "EVENT.LOG") {
+      const logEvent = {
+        ...lastJsonMessage.payload,
+        timestamp: lastJsonMessage.timestamp, // Add timestamp to payload for easier use
+      };
 
       if (isPaused) {
         setQueuedEvents((prev) => [logEvent, ...prev]);
@@ -494,12 +494,12 @@ export default function EventsTab({ initialFilter = "" }: EventsTabProps) {
             progress: 1,
             totalSteps: 5, // This should come from the backend
             latestMessage: event.message,
-            timestamp: event.timestamp,
+            timestamp: (event as any).timestamp,
           });
         } else {
           const existing = processMap.get(runId)!;
           existing.latestMessage = event.message;
-          existing.timestamp = event.timestamp;
+          existing.timestamp = (event as any).timestamp;
           existing.currentStep = event.fields?.block_id as string;
         }
       }
@@ -522,26 +522,25 @@ export default function EventsTab({ initialFilter = "" }: EventsTabProps) {
       // Time range filter
       if (filters.timeRange !== "all") {
         const now = new Date();
-        const eventTime = new Date(event.timestamp);
+        const eventTime = new Date((event as any).timestamp);
         const diffMs = now.getTime() - eventTime.getTime();
 
-        const limits = {
+        // Type the limits object explicitly for TypeScript
+        const limits: Record<Exclude<TimeRange, "all">, number> = {
           "5m": 5 * 60 * 1000,
           "15m": 15 * 60 * 1000,
           "1h": 60 * 60 * 1000,
           today: now.setHours(0, 0, 0, 0),
         };
 
+        // This check is now type-safe because we've already handled the 'all' case
         if (diffMs > limits[filters.timeRange]) {
           return false;
         }
       }
 
       // Component filter
-      if (
-        filters.component &&
-        event.labels?.component !== filters.component
-      ) {
+      if (filters.component && event.labels?.component !== filters.component) {
         return false;
       }
 
@@ -573,12 +572,11 @@ export default function EventsTab({ initialFilter = "" }: EventsTabProps) {
 
   // Temporal grouping: insert dividers
   const eventsWithDividers = useMemo(() => {
-    const result: Array<LogEventPayload | { type: "divider"; time: string }> =
-      [];
+    const result: Array<SepPayload | { type: "divider"; time: string }> = [];
     let lastTimestamp: Date | null = null;
 
     filteredEvents.forEach((event) => {
-      const currentTimestamp = new Date(event.timestamp);
+      const currentTimestamp = new Date((event as any).timestamp);
 
       if (lastTimestamp) {
         const diffMs = lastTimestamp.getTime() - currentTimestamp.getTime();
@@ -664,7 +662,11 @@ export default function EventsTab({ initialFilter = "" }: EventsTabProps) {
             variant="subtle"
             size="xs"
             leftSection={
-              isPaused ? <IconPlayerPlay size={14} /> : <IconPlayerPause size={14} />
+              isPaused ? (
+                <IconPlayerPlay size={14} />
+              ) : (
+                <IconPlayerPause size={14} />
+              )
             }
             onClick={togglePause}
           >
@@ -809,10 +811,10 @@ export default function EventsTab({ initialFilter = "" }: EventsTabProps) {
               );
             }
 
-            const event = item as LogEventPayload;
+            const event = item as SepPayload;
             return (
               <EventLogLine
-                key={`${event.timestamp}-${index}`}
+                key={`${(event as any).timestamp}-${index}`}
                 log={event}
                 isHighlighted={false}
                 onClick={() => {

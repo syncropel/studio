@@ -41,7 +41,7 @@ export default function SessionRecoveryModal({
       <Text size="sm" mb="md">
         It looks like you have unsaved changes for the notebook{" "}
         <Text span fw={700}>
-          "{pageName}"
+          `{pageName}`
         </Text>
         .
       </Text>

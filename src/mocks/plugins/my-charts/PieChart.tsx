@@ -1,4 +1,4 @@
-// /home/dpwanjala/repositories/syncropel/studio/src/mocks/plugins/my-charts/PieChart.tsx
+// /home/dpwanjala/repositories/syncropel/studio/src/widgets/plugins/my-charts/PieChart.tsx
 "use client";
 
 import React, { useMemo } from "react";
@@ -17,17 +17,18 @@ interface PieChartProps {
 }
 
 export default function MockPieChart({ title, data }: PieChartProps) {
-  if (!data || data.length === 0) {
-    return <Text c="dimmed">No data provided for chart.</Text>;
-  }
-
   // Nivo's Pie component expects data with `id` and `value` keys.
   // We map our generic `name`/`value` props to the required format.
   // This makes our custom component a robust adapter.
   const nivoData = useMemo(
-    () => data.map((item) => ({ id: item.name, value: item.value })),
+    () =>
+      data ? data.map((item) => ({ id: item.name, value: item.value })) : [],
     [data]
   );
+
+  if (!data || data.length === 0) {
+    return <Text c="dimmed">No data provided for chart.</Text>;
+  }
 
   return (
     <Box style={{ width: "100%", height: 300 }}>

@@ -2,6 +2,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { useSessionStore } from "./useSessionStore";
+import { useSettingsStore } from "./useSettingsStore"; // ADD THIS IMPORT
 
 export interface ConnectionProfile {
   id: string;
@@ -23,24 +24,17 @@ interface ConnectionStore {
   disconnect: () => void;
 }
 
-// CHANGED: Determine the correct WebSocket URL based on environment
-// This fixes the WebSocket proxy issue - Next.js rewrites don't proxy WebSocket connections
 const getBundledServerUrl = (): string => {
   if (typeof window === "undefined") {
-    // Server-side fallback
     return "ws://localhost:3000/ws";
   }
 
-  // In development, connect directly to the mock WebSocket server
-  // because Next.js rewrites don't proxy WebSocket connections
   const isDevelopment = process.env.NODE_ENV === "development";
 
   if (isDevelopment) {
-    // Connect directly to mock server in development
     return "ws://localhost:8889/ws";
   }
 
-  // In production, use the same host as the web application
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}/ws`;
 };
@@ -57,7 +51,6 @@ export const useConnectionStore = create<ConnectionStore>()(
   persist(
     (set, get) => ({
       profiles: [BUNDLED_SERVER_PROFILE],
-      // REVERTED: Start with null so user must explicitly connect
       activeProfileId: null,
 
       setActiveProfileId: (id) => {
@@ -98,11 +91,12 @@ export const useConnectionStore = create<ConnectionStore>()(
 
       disconnect: () => {
         get().setActiveProfileId(null);
+        // ADD THIS LINE: Explicitly close the terminal panel on disconnect.
+        useSettingsStore.getState().toggleTerminal(false);
       },
 
       getActiveProfile: () => {
         const state = get();
-        // REVERTED: No fallback - return undefined when activeProfileId is null
         return state.profiles.find((p) => p.id === state.activeProfileId);
       },
     }),

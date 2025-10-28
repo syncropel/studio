@@ -10,12 +10,14 @@ import {
 } from "@tabler/icons-react";
 import { useSessionStore } from "@/shared/store/useSessionStore";
 import { useUIStateStore } from "@/shared/store/useUIStateStore";
+import { useWebSocket } from "@/shared/providers/WebSocketProvider"; // ADDED
 import ActivityHubWidget from "../ActivityHubWidget";
 
 export default function BottomActionBar() {
   const { currentPage } = useSessionStore();
   const { openSpotlight, toggleInspectorDrawer, openModal, triggerRunAll } =
     useUIStateStore();
+  const { readyState } = useWebSocket(); // ADDED: Get the connection state
 
   const handleRunAll = () => {
     triggerRunAll();
@@ -24,7 +26,8 @@ export default function BottomActionBar() {
   const handleOpenActivityHub = () => {
     openModal({
       title: "Activity Hub",
-      content: <ActivityHubWidget />,
+      // FIXED: Pass the required readyState prop
+      content: <ActivityHubWidget readyState={readyState} />,
       size: "95%",
     });
   };

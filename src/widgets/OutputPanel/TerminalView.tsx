@@ -10,6 +10,8 @@ import {
   Text,
   Center,
   Button,
+  Paper,
+  UnstyledButton,
 } from "@mantine/core";
 import { IconSparkles, IconTerminal2 } from "@tabler/icons-react";
 import {
@@ -175,80 +177,104 @@ const ModeSwitchMessage = ({
 };
 
 // --- Empty State ---
+// CHANGED: Made the layout more compact and minimalistic with cards side by side in a row
+// CHANGED: Added top padding and improved active state styling with better instructions
 const EmptyState = () => {
-  const { outputPanelMode } = useUIStateStore();
+  const { outputPanelMode, setOutputPanelMode } = useUIStateStore();
   const isAgent = outputPanelMode === "agent";
 
+  const ModeCard = ({
+    icon,
+    title,
+    description,
+    isActive,
+    onClick,
+  }: {
+    icon: React.ReactNode;
+    title: string;
+    description: string;
+    isActive: boolean;
+    onClick: () => void;
+  }) => (
+    <UnstyledButton onClick={onClick} disabled={isActive} style={{ flex: 1 }}>
+      <Paper
+        p="xs"
+        withBorder
+        className="transition-all h-full"
+        // CHANGED: Using direct style prop instead of mod for guaranteed styling
+        style={{
+          backgroundColor: isActive
+            ? "var(--mantine-color-blue-light)"
+            : undefined,
+          borderColor: isActive
+            ? "var(--mantine-color-blue-filled)"
+            : "var(--mantine-color-gray-4)",
+          borderWidth: isActive ? "2px" : "1px",
+          opacity: isActive ? 1 : 0.7,
+        }}
+        styles={{
+          root: {
+            "&:hover": {
+              opacity: 1,
+              backgroundColor: isActive
+                ? "var(--mantine-color-blue-light)"
+                : "var(--mantine-color-gray-light-hover)",
+            },
+          },
+        }}
+      >
+        <Stack gap={4}>
+          <Group gap={6}>
+            {icon}
+            <Text size="sm" fw={isActive ? 600 : 500}>
+              {" "}
+              {/* CHANGED: Bold font for active card */}
+              {title}
+            </Text>
+          </Group>
+          <Text size="xs" c="dimmed" className="leading-tight">
+            {description}
+          </Text>
+        </Stack>
+      </Paper>
+    </UnstyledButton>
+  );
+
   return (
-    <Center className="h-full px-4">
-      <Stack align="center" gap="sm" className="max-w-xs">
-        {isAgent ? (
-          <>
-            <Box
-              className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-950 
-                         flex items-center justify-center"
-            >
-              <IconSparkles size={20} className="text-blue-600" />
-            </Box>
-            <Stack gap={2} align="center">
-              <Text
-                size="sm"
-                fw={600}
-                className="text-neutral-800 dark:text-neutral-200"
-              >
-                Syncro Agent
-              </Text>
-              <Text size="xs" c="dimmed" className="text-center">
-                Ask me to create reports, analyze data, or build workflows.
-              </Text>
-              <Text size="xs" c="dimmed" className="text-center mt-2">
-                Type{" "}
-                <Text
-                  component="span"
-                  ff="monospace"
-                  fw={500}
-                  className="text-neutral-600 dark:text-neutral-400"
-                >
-                  cli
-                </Text>{" "}
-                to switch modes
-              </Text>
-            </Stack>
-          </>
-        ) : (
-          <>
-            <Box
-              className="w-10 h-10 rounded-full bg-neutral-100 dark:bg-neutral-900 
-                         flex items-center justify-center"
-            >
-              <IconTerminal2 size={20} className="text-neutral-600" />
-            </Box>
-            <Stack gap={2} align="center">
-              <Text
-                size="sm"
-                fw={600}
-                className="text-neutral-800 dark:text-neutral-200"
-              >
-                CLI Mode
-              </Text>
-              <Text size="xs" c="dimmed" className="text-center">
-                Execute commands for flows, notebooks, and data.
-              </Text>
-              <Text size="xs" c="dimmed" className="text-center mt-2">
-                Type{" "}
-                <Text
-                  component="span"
-                  ff="monospace"
-                  fw={500}
-                  className="text-neutral-600 dark:text-neutral-400"
-                >
-                  agent
-                </Text>{" "}
-                to switch modes
-              </Text>
-            </Stack>
-          </>
-        )}
+    <Center className="h-full px-8">
+      <Stack
+        align="center"
+        gap="md"
+        className="w-full max-w-2xl"
+        style={{ paddingTop: "48px" }}
+      >
+        <div style={{ display: "flex", gap: "12px", width: "100%" }}>
+          <ModeCard
+            icon={<IconSparkles size={16} className="text-blue-500" />}
+            title="Syncro"
+            description="Ask me to create reports, analyze data, or build workflows."
+            isActive={isAgent}
+            onClick={() => setOutputPanelMode("agent")}
+          />
+          <ModeCard
+            icon={<IconTerminal2 size={16} className="text-gray-600" />}
+            title="cx-shell"
+            description="Run deterministic commands for flows, connections, and workspace management."
+            isActive={!isAgent}
+            onClick={() => setOutputPanelMode("cli")}
+          />
+        </div>
+        <Text size="xs" c="dimmed" className="text-center">
+          Type{" "}
+          <Text component="span" ff="monospace" c="inherit" fw={500}>
+            `agent`
+          </Text>{" "}
+          or{" "}
+          <Text component="span" ff="monospace" c="inherit" fw={500}>
+            `cli`
+          </Text>{" "}
+          to switch modes
+        </Text>
       </Stack>
     </Center>
   );
@@ -321,7 +347,6 @@ export default function TerminalView() {
         )}
       </ScrollArea>
 
-      {/* CHANGED: Ensured CommandBar has flex-shrink-0 to always stay visible */}
       <CommandBar />
     </div>
   );
