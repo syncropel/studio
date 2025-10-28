@@ -4,7 +4,7 @@ import type { NextConfig } from "next";
 const isDev = process.env.NODE_ENV === "development";
 
 const nextConfig: NextConfig = {
-  // output: "export",
+  output: "export",
   assetPrefix: "./",
 
   // The `rewrites` function allows us to proxy requests during development.
