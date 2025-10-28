@@ -87,13 +87,27 @@ export default function ActivityHubWidget() {
   };
 
   return (
-    <Box className="h-full w-full flex flex-col bg-gray-50 dark:bg-gray-900">
+    <div
+      style={{
+        height: "100%",
+        width: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
       <Tabs
         value={activeOutputPanelTab}
         onChange={(value) => setActiveOutputPanelTab(value)}
-        className="flex flex-col flex-grow h-full"
+        style={{
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
       >
-        <Tabs.List>
+        {/* CHANGED: Added flex-shrink-0 to prevent tabs from being compressed */}
+        <Tabs.List className="flex-shrink-0">
           {/* Dynamically render the list of tabs from the global store */}
           {outputPanelTabs.map((tabId) => {
             const { icon, label } = getTabInfo(tabId);
@@ -134,16 +148,24 @@ export default function ActivityHubWidget() {
         </Tabs.List>
 
         {/* Dynamically render the content panel for each tab */}
+        {/* CHANGED: Removed overflow-auto, added min-h-0 for proper flex scrolling */}
+        {/* CHANGED: Added inline style to ensure flex column layout */}
         {outputPanelTabs.map((tabId) => (
           <Tabs.Panel
             key={tabId}
             value={tabId}
-            className="flex-grow overflow-auto"
+            style={{
+              flexGrow: 1,
+              minHeight: 0,
+              display: "flex",
+              flexDirection: "column",
+              height: "100%",
+            }}
           >
             {renderPanelContent(tabId)}
           </Tabs.Panel>
         ))}
       </Tabs>
-    </Box>
+    </div>
   );
 }

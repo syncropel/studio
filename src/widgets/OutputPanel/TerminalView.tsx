@@ -109,7 +109,12 @@ const CliOutputMessage = ({
         py={4}
         className="font-mono text-xs text-neutral-700 dark:text-neutral-300 
                    border-b border-neutral-100 dark:border-neutral-900"
-        style={{ whiteSpace: "pre-wrap" }}
+        style={{
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          overflowWrap: "anywhere",
+          maxWidth: "100%",
+        }}
       >
         {parts[0]}
         <Button
@@ -134,7 +139,12 @@ const CliOutputMessage = ({
       py={4}
       className="font-mono text-xs text-neutral-700 dark:text-neutral-300 
                  border-b border-neutral-100 dark:border-neutral-900"
-      style={{ whiteSpace: "pre-wrap" }}
+      style={{
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        overflowWrap: "anywhere",
+        maxWidth: "100%",
+      }}
     >
       {turn.content}
     </Box>
@@ -248,6 +258,9 @@ const EmptyState = () => {
  * The main view for the "Terminal" tab. It's a unified component that renders
  * the entire conversation history, including agent chats, user prompts,
  * CLI commands, and CLI outputs.
+ *
+ * CHANGED: Added proper height constraints and flex layout to ensure ScrollArea works correctly
+ * and CommandBar always stays visible at the bottom.
  */
 export default function TerminalView() {
   const viewport = useRef<HTMLDivElement>(null);
@@ -264,9 +277,17 @@ export default function TerminalView() {
   }, [conversationHistory.length]);
 
   return (
-    <Stack gap={0} className="h-full bg-white dark:bg-neutral-950">
+    // CHANGED: Added explicit flex layout with h-full and overflow-x-hidden to prevent horizontal scrolling
+    <div
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
       <ScrollArea
-        className="flex-1"
+        style={{ flex: 1, minHeight: 0 }}
         viewportRef={viewport}
         styles={{
           viewport: {
@@ -300,7 +321,8 @@ export default function TerminalView() {
         )}
       </ScrollArea>
 
+      {/* CHANGED: Ensured CommandBar has flex-shrink-0 to always stay visible */}
       <CommandBar />
-    </Stack>
+    </div>
   );
 }

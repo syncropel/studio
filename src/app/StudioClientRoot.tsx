@@ -300,13 +300,16 @@ export default function StudioClientRoot() {
 
       <TopBar />
 
+      {/* CHANGED: Added h-full to the flex-grow div to establish height context */}
       <div
-        className="flex-grow min-h-0"
+        className="flex-grow min-h-0 h-full"
         style={{ paddingBottom: isMobile && currentPage ? "60px" : "0" }}
       >
-        <PanelGroup direction="vertical">
+        {/* CHANGED: Added h-full to vertical PanelGroup for proper height propagation */}
+        <PanelGroup direction="vertical" className="h-full">
           <Panel>
-            <PanelGroup direction="horizontal">
+            {/* CHANGED: Added h-full to horizontal PanelGroup */}
+            <PanelGroup direction="horizontal" className="h-full">
               {!isMobile && isConnected && (
                 <>
                   <Panel defaultSize={20} minSize={15} maxSize={40}>
@@ -333,8 +336,18 @@ export default function StudioClientRoot() {
           {!isMobile && isTerminalVisible && (
             <>
               <PanelResizeHandle className="h-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 transition-colors" />
+              {/* CHANGED: Wrapped ActivityHubWidget in a Box with h-full and w-full for proper height/width constraint */}
               <Panel defaultSize={25} minSize={15} maxSize={60}>
-                <ActivityHubWidget />
+                <div
+                  style={{
+                    height: "100%",
+                    width: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  <ActivityHubWidget />
+                </div>
               </Panel>
             </>
           )}
